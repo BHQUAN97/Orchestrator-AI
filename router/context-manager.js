@@ -2,7 +2,7 @@
 /**
  * Context Manager — Chuẩn hóa context cho multi-model orchestration
  *
- * Vấn đề: Mỗi model (Claude, DeepSeek, Kimi, Gemini) hiểu context dạng text khác nhau.
+ * Van de: Moi model (Opus, Sonnet, DeepSeek, Gemini, GPT Mini) hieu context dang text khac nhau.
  * Giải pháp: Normalize context thành structured JSON → inject vào prompt theo format chuẩn.
  *
  * Mỗi model nhận CÙNG 1 context object, chỉ khác prompt template.

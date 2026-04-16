@@ -1,0 +1,39 @@
+{
+  "name": "ai-orchestrator",
+  "version": "2.0.0",
+  "description": "Multi-model AI Coding Agent — plan, execute, verify with tool use",
+  "main": "router/orchestrator-agent.js",
+  "bin": {
+    "orcai": "./bin/orcai.js"
+  },
+  "type": "commonjs",
+  "files": [
+    "bin/",
+    "lib/",
+    "tools/",
+    "router/",
+    "cache/",
+    "graph/",
+    "prompts/",
+    "skills/",
+    "index.js"
+  ],
+  "scripts": {
+    "start": "node bin/orcai.js",
+    "test": "node router/test-router.js",
+    "dev": "node bin/orcai.js --interactive"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "fast-glob": "^3.3.2",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1",
+    "tree-kill": "^1.2.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "BHQUAN97",
+  "license": "MIT"
+}

@@ -1,38 +1,46 @@
 {
   "rooCode.apiConfigurations": {
     "profiles": {
+      "architect": {
+        "provider": "litellm",
+        "litellmBaseUrl": "http://localhost:5002",
+        "litellmApiKey": "your-litellm-master-key",
+        "litellmModelId": "architect",
+        "displayName": "Opus 4.6 (Architect)"
+      },
       "reasoning": {
         "provider": "litellm",
-        "litellmBaseUrl": "http://localhost:4001",
+        "litellmBaseUrl": "http://localhost:5002",
         "litellmApiKey": "your-litellm-master-key",
         "litellmModelId": "smart",
-        "displayName": "Sonnet 4 (Smart)"
+        "displayName": "Sonnet 4.6 (Smart)"
       },
       "coding": {
         "provider": "litellm",
-        "litellmBaseUrl": "http://localhost:4001",
+        "litellmBaseUrl": "http://localhost:5002",
         "litellmApiKey": "your-litellm-master-key",
         "litellmModelId": "default",
-        "displayName": "Kimi K2.5 (Default)"
+        "displayName": "DeepSeek V3.2 (Default)"
       },
       "review": {
         "provider": "litellm",
-        "litellmBaseUrl": "http://localhost:4001",
+        "litellmBaseUrl": "http://localhost:5002",
         "litellmApiKey": "your-litellm-master-key",
         "litellmModelId": "fast",
-        "displayName": "Gemini Flash (Fast)"
+        "displayName": "Gemini 3 Flash (Fast)"
       },
       "cheap": {
         "provider": "litellm",
-        "litellmBaseUrl": "http://localhost:4001",
+        "litellmBaseUrl": "http://localhost:5002",
         "litellmApiKey": "your-litellm-master-key",
         "litellmModelId": "cheap",
-        "displayName": "DeepSeek (Cheap)"
+        "displayName": "GPT-5.4 Mini (Cheap)"
       }
     },
     "modeProfiles": {
       "spec": "reasoning",
-      "architect": "reasoning",
+      "architect": "architect",
+      "tech-lead": "reasoning",
       "build": "coding",
       "code": "coding",
       "review": "review",

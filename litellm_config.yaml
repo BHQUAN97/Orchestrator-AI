@@ -1,75 +1,99 @@
 # ============================================
 # LiteLLM Proxy Config — Multi-Model Gateway
 # Co: Gemini key + OpenRouter key (200+ models)
+# Updated: 2026-04-16 — Upgrade model lineup v2
 # ============================================
 
 model_list:
-  # ★ default: Kimi K2.5 qua OpenRouter
+  # ★ default: DeepSeek V3.2 qua OpenRouter (thay Kimi K2.5)
   - model_name: "default"
     litellm_params:
-      model: "openai/moonshotai/kimi-k2.5"
+      model: "openai/deepseek/deepseek-v3.2"
       api_base: "https://openrouter.ai/api/v1"
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
-  # smart: Claude Sonnet 4 qua OpenRouter
+  # ★★ architect: Claude Opus 4.6 — SA, kien truc, task cuc kho
+  - model_name: "architect"
+    litellm_params:
+      model: "openai/anthropic/claude-opus-4-6"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 10
+
+  # smart: Claude Sonnet 4.6 qua OpenRouter (upgrade tu Sonnet 4)
   - model_name: "smart"
     litellm_params:
-      model: "openai/anthropic/claude-sonnet-4"
+      model: "openai/anthropic/claude-sonnet-4-6"
       api_base: "https://openrouter.ai/api/v1"
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 20
 
-  # fast: Gemini truc tiep (free key)
+  # fast: Gemini 3 Flash Preview truc tiep (upgrade tu 2.5 Flash)
   - model_name: "fast"
     litellm_params:
-      model: "gemini/gemini-2.5-flash"
+      model: "gemini/gemini-3-flash-preview"
       api_key: "os.environ/GEMINI_API_KEY"
       rpm: 60
 
-  # fast fallback: Gemini qua OpenRouter
+  # fast fallback: Gemini 3 Flash qua OpenRouter
   - model_name: "fast"
     litellm_params:
-      model: "openai/google/gemini-2.5-flash"
+      model: "openai/google/gemini-3-flash-preview"
       api_base: "https://openrouter.ai/api/v1"
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
-  # cheap: DeepSeek qua OpenRouter
+  # cheap: GPT-5.4 Mini qua OpenRouter (thay DeepSeek Chat)
   - model_name: "cheap"
     litellm_params:
-      model: "openai/deepseek/deepseek-chat-v3-0324"
+      model: "openai/openai/gpt-5.4-mini"
       api_base: "https://openrouter.ai/api/v1"
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
   # --- Goi truc tiep tung model ---
-  - model_name: "kimi"
-    litellm_params:
-      model: "openai/moonshotai/kimi-k2.5"
-      api_base: "https://openrouter.ai/api/v1"
-      api_key: "os.environ/OPENROUTER_API_KEY"
-      rpm: 30
-
   - model_name: "deepseek"
     litellm_params:
-      model: "openai/deepseek/deepseek-chat-v3-0324"
+      model: "openai/deepseek/deepseek-v3.2"
       api_base: "https://openrouter.ai/api/v1"
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
   - model_name: "gemini"
     litellm_params:
-      model: "gemini/gemini-2.5-flash"
+      model: "gemini/gemini-3-flash-preview"
       api_key: "os.environ/GEMINI_API_KEY"
       rpm: 60
 
+  - model_name: "opus"
+    litellm_params:
+      model: "openai/anthropic/claude-opus-4-6"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 10
+
   - model_name: "sonnet"
     litellm_params:
-      model: "openai/anthropic/claude-sonnet-4"
+      model: "openai/anthropic/claude-sonnet-4-6"
       api_base: "https://openrouter.ai/api/v1"
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 20
+
+  - model_name: "gpt-mini"
+    litellm_params:
+      model: "openai/openai/gpt-5.4-mini"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # Legacy — giu lai de fallback
+  - model_name: "kimi"
+    litellm_params:
+      model: "openai/moonshotai/kimi-k2.5"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
 
 # Router
 router_settings:
@@ -80,10 +104,10 @@ router_settings:
   num_retries: 2
   retry_after: 5
 
-# Budget
+# Budget — gioi han $2/ngay (user requirement)
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"
-  max_budget: 5.0
+  max_budget: 2.0
   budget_duration: "1d"
 
 # Cache

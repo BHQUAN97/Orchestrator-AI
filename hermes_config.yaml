@@ -1,10 +1,10 @@
 # ============================================
-# Hermes Agent Config
-# Hien tai: goi Gemini qua LiteLLM proxy
-# Fallback: goi Gemini truc tiep neu proxy down
+# Hermes Agent Config (v2.1 — 2026-04-16)
+# BRAIN: memory, vector DB, auto-learn, self-improve
+# Goi Orchestrator API de execute tasks
 # ============================================
 
-# Primary: goi qua LiteLLM proxy
+# Primary: goi qua LiteLLM proxy (port 5002 internal 4000)
 provider: custom
 model: default
 api_base: http://litellm:4000/v1
@@ -12,14 +12,30 @@ api_base: http://litellm:4000/v1
 # Fallback: Gemini truc tiep
 fallback_providers:
   - provider: gemini
-    model: gemini-2.5-flash
+    model: gemini-3-flash-preview
 
-# Memory
+# Orchestrator API — Hermes goi day de execute tasks
+orchestrator:
+  url: http://orchestrator:5003
+  endpoints:
+    run: /api/run
+    scan: /api/scan
+    plan: /api/plan
+    execute: /api/execute
+    budget: /api/budget
+    route: /api/route
+
+# Memory — diem manh cua Hermes
 memory:
   enabled: true
   backend: sqlite
   search: fts5
   auto_summarize: true
+  # Vector DB cho long-term memory
+  vector_store:
+    enabled: true
+    auto_update: true
+    auto_prune: true
 
 # Context optimization
 context:
@@ -51,7 +67,7 @@ security:
     allowed_paths:
       - /projects/
 
-# Skills
+# Skills — auto-learn tu conversations
 skills:
   auto_learn: true
   directory: /root/.hermes/skills/

@@ -1,17 +1,22 @@
 # ============================================
-# AI Orchestrator — Full Stack
+# AI Orchestrator v2.1 — Hermes Brain + Orchestrator Hands
 # Chay: docker compose up -d
-# Dashboard: http://localhost:4000 (LiteLLM)
-# Hermes UI: http://localhost:3000
+# Port range: 5000-5009
+#
+# Hermes (Brain):       http://localhost:5000
+# Hermes WebUI:         http://localhost:5001
+# LiteLLM Gateway:      http://localhost:5002
+# Orchestrator API:     http://localhost:5003
+# Analytics + Dashboard: http://localhost:5004
 # ============================================
 
 services:
-  # === LiteLLM Proxy — API Gateway + Cost Tracking + Dashboard ===
+  # === LiteLLM Proxy — API Gateway (tat ca model di qua day) ===
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    container_name: litellm-proxy
+    container_name: orcai-litellm
     ports:
-      - "${LITELLM_PORT:-4001}:4000"
+      - "${LITELLM_PORT:-5002}:4000"
     volumes:
       - ./litellm_config.yaml:/app/config.yaml
       - litellm_data:/app/data
@@ -33,48 +38,99 @@ services:
       timeout: 10s
       retries: 3
 
-  # === Hermes Agent — Multi-Model Agent Engine ===
+  # === Hermes Agent — BRAIN: memory, vector DB, auto-learn, self-improve ===
   hermes:
     image: nousresearch/hermes-agent:latest
-    container_name: hermes-agent
+    container_name: orcai-hermes
     ports:
-      - "${HERMES_PORT:-3000}:3000"
+      - "${HERMES_PORT:-5000}:3000"
     volumes:
       - hermes_data:/root/.hermes
       - ./hermes_config.yaml:/root/.hermes/config.yaml
-      # Mount projects de Hermes co the doc/ghi code
+      - ./skills:/root/.hermes/skills
+      # Mount projects de Hermes doc/ghi code
       - /e/DEVELOP/FashionEcom:/projects/FashionEcom
       - /e/DEVELOP/VietNet2026:/projects/VietNet2026
       - /e/DEVELOP/LeQuyDon:/projects/LeQuyDon
       - /e/DEVELOP/WebPhoto:/projects/WebPhoto
       - /e/DEVELOP/RemoteTerminal:/projects/RemoteTerminal
+      - /e/DEVELOP/ai-orchestrator:/projects/ai-orchestrator
     env_file:
       - .env
     environment:
       - OPENAI_API_BASE=http://litellm:4000/v1
       - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - ORCHESTRATOR_URL=http://orchestrator:5003
       - GATEWAY_ALLOW_ALL_USERS=true
     depends_on:
       - litellm
     restart: unless-stopped
     command: ["dashboard", "--host", "0.0.0.0", "--port", "3000", "--insecure"]
 
-  # === Hermes WebUI — Web Dashboard cho mobile ===
+  # === Hermes WebUI — Mobile-friendly dashboard ===
   hermes-webui:
     image: ghcr.io/nesquena/hermes-webui:latest
-    container_name: hermes-webui
+    container_name: orcai-webui
     ports:
-      - "3002:3000"
+      - "${WEBUI_PORT:-5001}:3000"
     environment:
       - HERMES_URL=http://hermes:3000
     depends_on:
       - hermes
     restart: unless-stopped
 
+  # === Orchestrator API — HANDS: scan, plan, route, execute ===
+  orchestrator:
+    image: node:22-alpine
+    container_name: orcai-orchestrator
+    working_dir: /app
+    ports:
+      - "${ORCHESTRATOR_PORT:-5003}:5003"
+    volumes:
+      - ./:/app
+      - /e/DEVELOP/FashionEcom:/projects/FashionEcom
+      - /e/DEVELOP/VietNet2026:/projects/VietNet2026
+      - /e/DEVELOP/LeQuyDon:/projects/LeQuyDon
+      - /e/DEVELOP/WebPhoto:/projects/WebPhoto
+      - /e/DEVELOP/RemoteTerminal:/projects/RemoteTerminal
+    command: ["node", "src/api-server.js"]
+    environment:
+      - PORT=5003
+      - LITELLM_URL=http://litellm:4000
+      - LITELLM_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - DAILY_BUDGET=2.00
+    depends_on:
+      - litellm
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5003/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # === Analytics + Dashboard — Cost tracking + monitoring ===
+  analytics:
+    image: node:22-alpine
+    container_name: orcai-analytics
+    working_dir: /app
+    ports:
+      - "${ANALYTICS_PORT:-5004}:5004"
+    volumes:
+      - ./analytics:/app/analytics:ro
+      - ./data:/app/data
+    command: ["node", "analytics/api-server.js"]
+    environment:
+      - ANALYTICS_PORT=5004
+      - LITELLM_URL=http://litellm:4000
+      - LITELLM_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+    depends_on:
+      - litellm
+    restart: unless-stopped
+
   # === Trust Graph Watcher — Auto re-index khi file thay doi ===
   trust-graph:
     image: node:22-alpine
-    container_name: trust-graph-watcher
+    container_name: orcai-trustgraph
     working_dir: /app
     volumes:
       - ./graph:/app/graph:ro
@@ -85,39 +141,6 @@ services:
       - /e/DEVELOP/WebPhoto:/projects/WebPhoto:ro
       - /e/DEVELOP/RemoteTerminal:/projects/RemoteTerminal:ro
     command: ["node", "graph/watcher-docker.js"]
-    restart: unless-stopped
-
-  # === Orchestrator Dashboard — Tong hop monitoring ===
-  dashboard:
-    image: node:22-alpine
-    container_name: orch-dashboard
-    working_dir: /app
-    ports:
-      - "9080:8080"
-    volumes:
-      - ./dashboard:/app:ro
-    command: ["node", "serve.js"]
-    environment:
-      - DASHBOARD_PORT=8080
-    restart: unless-stopped
-
-  # === Analytics API — Cost tracking chi tiet ===
-  analytics:
-    image: node:22-alpine
-    container_name: orch-analytics
-    working_dir: /app
-    ports:
-      - "9081:9081"
-    volumes:
-      - ./analytics:/app/analytics:ro
-      - ./data:/app/data
-    command: ["node", "analytics/api-server.js"]
-    environment:
-      - ANALYTICS_PORT=9081
-      - LITELLM_URL=http://litellm:4000
-      - LITELLM_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
-    depends_on:
-      - litellm
     restart: unless-stopped
 
 volumes:

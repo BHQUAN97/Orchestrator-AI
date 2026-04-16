@@ -13,7 +13,7 @@
 # Models: default (Kimi), smart (Sonnet), fast (Gemini), cheap (DeepSeek)
 # ============================================
 
-ANALYTICS="http://localhost:9081"
+ANALYTICS="http://localhost:5004"
 MODEL="${1:-default}"
 PROMPT="$2"
 PROJECT="${3:-unknown}"
@@ -25,12 +25,13 @@ if [ -z "$PROMPT" ]; then
   echo "Usage: bash ask.sh <model> \"<prompt>\" [project] [command]"
   echo ""
   echo "Models:"
-  echo "  default  — Kimi K2.5 (general coding)"
-  echo "  smart    — Claude Sonnet (architecture, spec)"
-  echo "  fast     — Gemini Flash (review, scan)"
-  echo "  cheap    — DeepSeek (docs, backend)"
+  echo "  cheap    — GPT-5.4 Mini (docs, scan)"
+  echo "  fast     — Gemini 3 Flash (review, scan)"
+  echo "  default  — DeepSeek V3.2 (FE/BE code)"
+  echo "  smart    — Sonnet 4.6 (debug, spec)"
+  echo "  architect— Opus 4.6 (system design)"
   echo ""
-  echo "All requests tracked at: http://localhost:9081/analytics"
+  echo "All requests tracked at: http://localhost:5004/analytics"
   exit 1
 fi
 

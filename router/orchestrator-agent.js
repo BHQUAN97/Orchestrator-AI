@@ -1,21 +1,27 @@
 #!/usr/bin/env node
 /**
- * Orchestrator Agent v2 — Multi-model orchestration với Tech Lead + Escalation
+ * Orchestrator Agent v2.1 — Multi-model orchestration voi 7 buoc
  *
- * FLOW HOÀN CHỈNH:
- * 1. User gửi task → Dispatcher (Gemini Flash, rẻ) phân tích → tạo plan
- * 2. Tech Lead (Claude Sonnet) quick review plan → approve/modify/reject
- * 3. Context Manager normalize context → inject vào mỗi agent
- * 4. Execute subtasks → dev agents (Kimi/DeepSeek) chạy song song
- * 5. Nếu agent gặp khó → escalate lên Tech Lead
- * 6. Tech Lead xử lý escalation → GUIDE/REDIRECT/TAKE_OVER
- * 7. Dispatcher tổng hợp kết quả cuối cùng
+ * FLOW HOAN CHINH (v2.1 — 2026-04-16):
+ * 1. User gui task
+ * 2. Scanner (cheap) → quet project, doc file, hieu boi canh. RE.
+ * 3. Planner (default) → xay dung execution plan tu scan results. GIA VUA.
+ * 4. Tech Lead (smart) → quick review plan → approve/modify/reject
+ * 5. Execute subtasks → dev agents chay song song
+ * 6. Neu agent gap kho → escalate: smart → architect
+ * 7. Synthesize ket qua cuoi cung
  *
- * Anti-patterns đã giải quyết:
- * ❌ Agent tự quyết API → ✅ Decision Lock, Tech Lead approve
- * ❌ Output không normalize → ✅ Context Manager normalize
- * ❌ Context dạng text dài → ✅ Structured JSON context
- * ❌ Agent override nhau → ✅ Decision Lock registry
+ * THAY DOI SO VOI v2:
+ * + Them Scanner: quet project truoc khi plan (giam ao giac)
+ * + Them Planner: xay dung plan chi tiet (thay dispatcher lam ca 2)
+ * + Dispatcher chi con lam synthesize cuoi cung
+ * + Escalation chain: cheap → default → smart → architect
+ *
+ * Anti-patterns da giai quyet:
+ * ❌ Dispatcher tu plan khong hieu project → ✅ Scanner quet truoc
+ * ❌ Plan bi ao giac vi khong doc code → ✅ Scanner doc file thuc te
+ * ❌ Agent tu quyet API → ✅ Decision Lock, Tech Lead approve
+ * ❌ Khong co duong escalate len top → ✅ Architect tier (Opus)
  */
 
 const { SmartRouter } = require('./smart-router');
@@ -23,52 +29,85 @@ const { ContextManager } = require('./context-manager');
 const { DecisionLock } = require('./decision-lock');
 const { TechLeadAgent } = require('./tech-lead-agent');
 
-const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:4001';
+const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:5002';
 const LITELLM_KEY = process.env.LITELLM_KEY || 'sk-master-change-me';
 
-// === Agent Role → Model mapping ===
-// Mỗi subtask có agentRole, map sang model phù hợp
+// === Agent Role → Model mapping (v2.1 — 2026-04-16) ===
+// 5 tiers: architect > smart > default > fast > cheap
 const AGENT_ROLE_MAP = {
-  'tech-lead':  'smart',   // Claude Sonnet — reasoning sâu
-  'fe-dev':     'default',  // Kimi K2.5 — FE specialist
-  'be-dev':     'cheap',    // DeepSeek — BE specialist
-  'reviewer':   'fast',     // Gemini Flash — scan nhanh, rẻ
-  'debugger':   'smart',    // Claude Sonnet — cần trace sâu
-  'docs':       'cheap',    // DeepSeek — text generation
-  'builder':    'default',  // Kimi K2.5 — general code
-  'dispatcher': 'fast'      // Gemini Flash — phân tích rẻ
+  'architect':  'architect', // Claude Opus 4.6 — SA, system design, task cuc kho
+  'tech-lead':  'smart',     // Claude Sonnet 4.6 — review, escalation, reasoning
+  'planner':    'default',   // DeepSeek V3.2 — xay dung plan tu scan data
+  'fe-dev':     'default',   // DeepSeek V3.2 — full-stack code gen
+  'be-dev':     'default',   // DeepSeek V3.2 — full-stack code gen
+  'reviewer':   'fast',      // Gemini 3 Flash — scan nhanh, re
+  'debugger':   'smart',     // Claude Sonnet 4.6 — trace sau
+  'scanner':    'cheap',     // GPT-5.4 Mini — quet project, doc file, thu thap context
+  'docs':       'cheap',     // GPT-5.4 Mini — text generation
+  'builder':    'default',   // DeepSeek V3.2 — general code
+  'dispatcher': 'fast'       // Gemini 3 Flash — synthesize ket qua
 };
 
-// === Dispatcher Prompt (nâng cấp) ===
-const DISPATCHER_SYSTEM = `Bạn là AI Orchestrator — phân tích và chia việc cho các agent chuyên biệt.
+// === Scanner Prompt — quet project, thu thap context (cheap, re) ===
+const SCANNER_SYSTEM = `Ban la Scanner — quet va thu thap thong tin tu project.
 
-KHÔNG tự làm — chỉ phân tích rồi chia việc.
+NHIEM VU:
+- Doc file structure, package.json, config files
+- Tim cac file lien quan den task duoc yeu cau
+- Phat hien: stack, framework, patterns dang dung
+- Ghi nhan: existing code, naming conventions, folder structure
+- Tim van de tiem an: conflicts, missing deps, tech debt
 
-CÁC AGENT CÓ SẴN:
-- "fe-dev" → model "default" (Kimi K2.5): Frontend — React, Next.js, Vue, CSS, Tailwind. RẺ.
-- "be-dev" → model "cheap" (DeepSeek): Backend — NestJS, Express, DB, SQL, API. RẺ.
-- "reviewer" → model "fast" (Gemini Flash): Review, scan, summarize. RẺ NHẤT.
-- "debugger" → model "smart" (Claude Sonnet): Debug phức tạp, trace cross-file. ĐẮT.
-- "docs" → model "cheap" (DeepSeek): Docs, comment, format. RẺ.
-- "builder" → model "default" (Kimi K2.5): General code — khi không rõ FE/BE.
+KHONG tu fix hay implement — chi QUET va BAO CAO.
 
-NGUYÊN TẮC:
-1. Ưu tiên agent RẺ nhất có thể làm được
-2. Chỉ dùng "debugger" (smart/đắt) khi THỰC SỰ cần trace > 3 files
-3. Chia nhỏ task để mỗi agent chỉ làm phần chuyên của nó
-4. Nếu task đơn giản → 1 agent là đủ, KHÔNG chia nhỏ quá mức
-5. Gán agentRole cho mỗi subtask
-
-Trả về JSON (KHÔNG markdown, KHÔNG giải thích):
+Tra ve JSON:
 {
-  "analysis": "1 dòng mô tả công việc",
+  "stack": ["next.js", "nestjs", "mysql"],
+  "relevant_files": [
+    { "path": "src/auth/auth.service.ts", "summary": "JWT login logic", "lines": 120 }
+  ],
+  "existing_patterns": ["Repository pattern", "DTO validation", "Guard-based auth"],
+  "potential_issues": ["Missing error handling in auth", "No rate limiting"],
+  "context_for_planner": "Mo ta ngan gon nhung gi planner can biet",
+  "estimated_complexity": "low|medium|high|very_high"
+}`;
+
+// === Planner Prompt — xay dung plan tu scan data (default, gia vua) ===
+const PLANNER_SYSTEM = `Ban la Planner — xay dung execution plan tu ket qua scan.
+
+Ban se nhan:
+1. User request (task can lam)
+2. Scan results (thong tin thuc te tu project)
+3. Locked decisions (khong duoc thay doi)
+
+CÁC AGENT CO SAN (sap theo gia):
+- "docs"     → "cheap"     (GPT-5.4 Mini):     Docs, comment, format. RE NHAT.
+- "reviewer" → "fast"      (Gemini 3 Flash):    Review, scan, summarize. RE.
+- "fe-dev"   → "default"   (DeepSeek V3.2):     Frontend code. GIA VUA.
+- "be-dev"   → "default"   (DeepSeek V3.2):     Backend code. GIA VUA.
+- "builder"  → "default"   (DeepSeek V3.2):     General code. GIA VUA.
+- "debugger" → "smart"     (Claude Sonnet 4.6):  Debug phuc tap. DAT.
+- "architect"→ "architect"  (Claude Opus 4.6):    System design. RAT DAT.
+
+NGUYEN TAC:
+1. DUA TREN SCAN RESULTS — khong tu bua file/function khong ton tai
+2. Uu tien agent RE nhat co the lam duoc
+3. Chi dung "debugger" khi CAN trace > 3 files
+4. Chi dung "architect" khi system design / trade-off analysis
+5. Chia nho task de moi agent chi lam phan chuyen cua no
+6. Task don gian → 1 agent la du, KHONG chia nho qua muc
+
+Tra ve JSON (KHONG markdown, KHONG giai thich):
+{
+  "analysis": "1 dong mo ta",
+  "complexity": "low|medium|high|very_high",
   "subtasks": [
     {
       "id": 1,
-      "description": "Mô tả sub-task",
-      "agentRole": "fe-dev|be-dev|reviewer|debugger|docs|builder",
-      "model": "fast|default|cheap|smart",
-      "reason": "Tại sao chọn agent này",
+      "description": "Mo ta sub-task — DUNG file path thuc te tu scan",
+      "agentRole": "fe-dev|be-dev|reviewer|debugger|docs|builder|architect",
+      "model": "cheap|fast|default|smart|architect",
+      "reason": "Tai sao chon agent nay",
       "files": ["file1.ts"],
       "depends_on": [],
       "estimated_tokens": 5000
@@ -78,20 +117,45 @@ Trả về JSON (KHÔNG markdown, KHÔNG giải thích):
   "total_estimated_cost": "$0.05"
 }`;
 
-// Số lần escalation tối đa cho 1 subtask trước khi dừng
+// === Dispatcher Prompt — chi con dung de synthesize cuoi cung ===
+const DISPATCHER_SYSTEM = `Ban la Synthesizer — tong hop ket qua tu nhieu agents.
+Tra ve ket qua cuoi cung ngan gon, tieng Viet.
+KHONG lap lai tung buoc — chi ket qua.`;
+
+// So lan escalation toi da cho 1 subtask truoc khi dung
 const MAX_ESCALATIONS_PER_TASK = 3;
 
-// === Orchestrator Agent v2 ===
+// === Chi phi uoc tinh per 1K tokens (input + output trung binh) ===
+const MODEL_COST_PER_1K = {
+  'architect': 0.045,  // ~$15 input + $75 output / 1M, avg ~$45/1M
+  'smart':     0.009,  // ~$3 input + $15 output / 1M, avg ~$9/1M
+  'default':   0.00075, // ~$0.30 input + $1.20 output / 1M
+  'fast':      0.000375, // ~$0.15 input + $0.60 output / 1M
+  'cheap':     0.0005   // ~$0.20 input + $0.80 output / 1M
+};
+
+// === Budget gioi han ===
+const DAILY_BUDGET = 2.00; // $2/ngay — KHONG vuot qua
+
+// === Orchestrator Agent v2.1 ===
 class OrchestratorAgent {
   constructor(options = {}) {
     this.litellmUrl = options.litellmUrl || LITELLM_URL;
     this.litellmKey = options.litellmKey || LITELLM_KEY;
     this.projectDir = options.projectDir || process.cwd();
     this.dispatcherModel = options.dispatcherModel || 'fast';
+    this.dailyBudget = options.dailyBudget || DAILY_BUDGET;
+
+    // Budget tracking
+    this.budgetTracker = {
+      date: new Date().toISOString().split('T')[0],
+      spent: 0,
+      calls: {}  // { model: { count, tokens, cost } }
+    };
 
     // Core modules
     this.smartRouter = new SmartRouter({
-      availableModels: options.availableModels || ['gemini-flash', 'kimi-k2.5', 'deepseek', 'sonnet'],
+      availableModels: options.availableModels || ['opus-4.6', 'sonnet-4.6', 'deepseek-v3.2', 'gemini-3-flash', 'gpt-5.4-mini'],
       costOptimize: true
     });
 
@@ -120,47 +184,170 @@ class OrchestratorAgent {
   }
 
   // =============================================
-  // FLOW CHÍNH: plan → review → execute → synthesize
+  // FLOW CHINH: scan → plan → review → execute → synthesize
   // =============================================
 
   /**
-   * Bước 1: Phân tích task → tạo execution plan
-   * Dùng Gemini Flash (rẻ nhất) làm dispatcher
+   * Buoc 1a: Scanner quet project — thu thap context thuc te (cheap, re)
+   * Giam ao giac vi planner se co data thuc te tu scan
    */
-  async plan(userPrompt, context = {}) {
-    const { files = [], project = '', feature = null } = context;
+  async scan(userPrompt, context = {}) {
+    const { files = [], project = '' } = context;
 
     // Build structured context
     const structuredCtx = await this.contextManager.build({
       task: context.task || 'build',
       description: userPrompt,
-      files,
-      feature
+      files
     });
 
-    // Build prompt cho dispatcher — kèm locked decisions
-    const activeLocks = this.decisionLock.getActive();
-    const lockInfo = activeLocks.length > 0
-      ? `\nLOCKED DECISIONS (KHÔNG thay đổi):\n${activeLocks.map(l => `- [${l.scope}] ${l.decision}`).join('\n')}`
-      : '';
+    // Thu thap file listing THUC TE tu project truoc khi gui cho scanner
+    // Scanner (cheap model) khong co tools doc file → can inject data thuc te
+    const fileData = await this._collectProjectData(files);
 
     const prompt = [
       `PROJECT: ${structuredCtx.project.name} (${structuredCtx.project.stack.join(', ')})`,
+      `DIR: ${structuredCtx.project.dir}`,
       `BRANCH: ${structuredCtx.project.branch}`,
-      files.length > 0 ? `FILES: ${files.join(', ')}` : '',
-      `DOMAIN: ${structuredCtx.task.domain}`,
-      lockInfo,
-      context.contextData ? `\nCONTEXT:\n${context.contextData}` : '',
-      `\nTASK: ${userPrompt}`
+      '',
+      `=== DU LIEU THUC TE TU PROJECT (da doc san) ===`,
+      fileData,
+      '',
+      files.length > 0 ? `FILES HINT TU USER: ${files.join(', ')}` : '',
+      context.contextData ? `\nEXTRA CONTEXT:\n${context.contextData}` : '',
+      `\nTASK CAN QUET: ${userPrompt}`
     ].filter(Boolean).join('\n');
 
-    // Gọi Gemini Flash để phân tích
-    const response = await this._callModel(this.dispatcherModel, DISPATCHER_SYSTEM, prompt);
+    console.log('🔍 Scanner: quet project...');
+    const response = await this._callModel('cheap', SCANNER_SYSTEM, prompt);
+
+    try {
+      return JSON.parse(response.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
+    } catch {
+      console.log('⚠️  Scanner JSON parse failed, dung basic scan');
+      return {
+        stack: structuredCtx.project.stack || [],
+        relevant_files: files.map(f => ({ path: f, summary: 'User-specified', lines: 0 })),
+        existing_patterns: [],
+        potential_issues: [],
+        context_for_planner: userPrompt,
+        estimated_complexity: 'medium'
+      };
+    }
+  }
+
+  /**
+   * Thu thap du lieu thuc te tu project de inject vao scanner prompt
+   * Scanner (cheap) khong co tools → can doc truoc roi dua vao
+   */
+  async _collectProjectData(hintFiles = []) {
+    const fs = require('fs');
+    const path = require('path');
+    const parts = [];
+
+    // 1. Doc package.json
+    try {
+      const pkgPath = path.join(this.projectDir, 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        parts.push(`[package.json] name=${pkg.name}, deps: ${Object.keys(pkg.dependencies || {}).slice(0, 20).join(', ')}`);
+        if (pkg.devDependencies) {
+          parts.push(`  devDeps: ${Object.keys(pkg.devDependencies).slice(0, 10).join(', ')}`);
+        }
+      }
+    } catch { /* ignore */ }
+
+    // 2. Doc folder structure (depth 2, max 50 entries)
+    try {
+      const tree = this._listDir(this.projectDir, 2, 50);
+      parts.push(`\n[Folder structure]\n${tree}`);
+    } catch { /* ignore */ }
+
+    // 3. Doc hint files (dau 50 dong moi file)
+    for (const file of hintFiles.slice(0, 5)) {
+      try {
+        const fullPath = path.isAbsolute(file) ? file : path.join(this.projectDir, file);
+        if (fs.existsSync(fullPath)) {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          const lines = content.split('\n').slice(0, 50).join('\n');
+          parts.push(`\n[${file}] (${content.split('\n').length} lines)\n${lines}`);
+        }
+      } catch { /* ignore */ }
+    }
+
+    return parts.join('\n') || 'Khong doc duoc du lieu project';
+  }
+
+  /**
+   * List directory tree (gioi han depth va entries)
+   */
+  _listDir(dir, maxDepth, maxEntries, depth = 0, entries = { count: 0 }) {
+    const fs = require('fs');
+    const path = require('path');
+    if (depth > maxDepth || entries.count > maxEntries) return '';
+
+    const SKIP = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.cache', 'coverage'];
+    const lines = [];
+
+    try {
+      const items = fs.readdirSync(dir).filter(i => !SKIP.includes(i)).slice(0, 30);
+      for (const item of items) {
+        if (entries.count > maxEntries) break;
+        entries.count++;
+        const fullPath = path.join(dir, item);
+        const indent = '  '.repeat(depth);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isDirectory()) {
+            lines.push(`${indent}${item}/`);
+            lines.push(this._listDir(fullPath, maxDepth, maxEntries, depth + 1, entries));
+          } else {
+            lines.push(`${indent}${item}`);
+          }
+        } catch { /* skip unreadable */ }
+      }
+    } catch { /* ignore */ }
+
+    return lines.filter(Boolean).join('\n');
+  }
+
+  /**
+   * Buoc 1b: Planner xay dung execution plan tu scan results (default, gia vua)
+   * Nhan scan data thuc te → plan chinh xac hon, it bua
+   */
+  async plan(userPrompt, context = {}) {
+    const { files = [], project = '', feature = null } = context;
+
+    // Scan truoc (neu chua co scan results)
+    let scanResults = context.scanResults;
+    if (!scanResults) {
+      scanResults = await this.scan(userPrompt, context);
+    }
+
+    // Build locked decisions context
+    const activeLocks = this.decisionLock.getActive();
+    const lockInfo = activeLocks.length > 0
+      ? `\nLOCKED DECISIONS (KHONG thay doi):\n${activeLocks.map(l => `- [${l.scope}] ${l.decision}`).join('\n')}`
+      : '';
+
+    const prompt = [
+      `=== SCAN RESULTS (du lieu thuc te tu project) ===`,
+      JSON.stringify(scanResults, null, 2),
+      lockInfo,
+      `\n=== USER REQUEST ===`,
+      userPrompt
+    ].join('\n');
+
+    console.log(`📐 Planner: xay dung plan (complexity: ${scanResults.estimated_complexity || 'unknown'})...`);
+
+    // Chon model cho planner dua tren complexity
+    const plannerModel = scanResults.estimated_complexity === 'very_high' ? 'smart' : 'default';
+    const response = await this._callModel(plannerModel, PLANNER_SYSTEM, prompt);
 
     try {
       const plan = JSON.parse(response.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
 
-      // Đảm bảo mỗi subtask có agentRole
+      // Dam bao moi subtask co agentRole va model
       for (const subtask of plan.subtasks) {
         if (!subtask.agentRole) {
           subtask.agentRole = this._inferAgentRole(subtask);
@@ -170,22 +357,30 @@ class OrchestratorAgent {
         }
       }
 
+      // Dinh kem scan results vao plan de agents co context
+      plan.scanResults = scanResults;
+
       return plan;
     } catch (e) {
-      // Fallback: dùng SmartRouter
-      console.log('⚠️  Dispatcher JSON parse failed, fallback to SmartRouter');
+      // Fallback: dung SmartRouter
+      console.log('⚠️  Planner JSON parse failed, fallback to SmartRouter');
       const routeResult = this.smartRouter.route({
-        task: context.task || 'build', files, prompt: userPrompt, project
+        task: context.task || 'build',
+        files: scanResults.relevant_files?.map(f => f.path) || files,
+        prompt: userPrompt,
+        project
       });
       return {
         analysis: userPrompt,
+        complexity: scanResults.estimated_complexity || 'medium',
+        scanResults,
         subtasks: [{
           id: 1,
           description: userPrompt,
           agentRole: 'builder',
           model: routeResult.litellm_name,
           reason: routeResult.reasons.join(', '),
-          files,
+          files: scanResults.relevant_files?.map(f => f.path) || files,
           depends_on: [],
           estimated_tokens: 10000
         }],
@@ -287,11 +482,11 @@ class OrchestratorAgent {
    * Full flow: plan → review → execute
    */
   async run(userPrompt, context = {}) {
-    // Bước 1: Plan
-    console.log('📝 Step 1: Planning...');
+    // Buoc 1: Scan + Plan (scan chay ben trong plan() neu chua co)
+    console.log('🔍 Step 1: Scan & Plan...');
     const plan = await this.plan(userPrompt, context);
 
-    // Bước 2: Tech Lead review
+    // Buoc 2: Tech Lead review
     console.log('🧠 Step 2: Tech Lead review...');
     const reviewResult = await this.review(plan, context);
 
@@ -369,7 +564,16 @@ class OrchestratorAgent {
 
       console.log(`🧠 Tech Lead: ${resolution.action} — ${resolution.analysis || ''}`);
 
-      if (resolution.action === 'guide') {
+      if (resolution.action === 'escalate_architect') {
+        // Chuyen thang len Architect (Opus) — tier cao nhat
+        console.log(`🏛️  [${subtask.id}] ESCALATE → Architect (Opus 4.6)`);
+        currentSubtask = {
+          ...currentSubtask,
+          model: 'architect',
+          agentRole: 'architect',
+          description: `${currentSubtask.description}\n\n[Escalated from Tech Lead]: ${resolution.analysis || ''}\n[Root cause]: ${resolution.rootCause || 'unknown'}\n[Previous context]: ${resolution.resolution?.newContext || ''}`
+        };
+      } else if (resolution.action === 'guide') {
         // Tech Lead cho hướng → retry subtask với context mới
         currentSubtask = {
           ...currentSubtask,
@@ -387,9 +591,11 @@ class OrchestratorAgent {
           console.log(`↪️  [${subtask.id}] Redirected → ${newModel}`);
         }
       } else if (resolution.action === 'take_over') {
-        // Tech Lead tự xử lý — gọi model smart
-        console.log(`🧠 [${subtask.id}] Tech Lead TAKING OVER`);
-        currentSubtask = { ...currentSubtask, model: 'smart', agentRole: 'tech-lead' };
+        // Escalate len tier cao hon hien tai
+        const currentModel = currentSubtask.model;
+        const nextTier = this._getNextEscalationTier(currentModel);
+        console.log(`🧠 [${subtask.id}] TAKE_OVER: ${currentModel} → ${nextTier.model} (${nextTier.role})`);
+        currentSubtask = { ...currentSubtask, model: nextTier.model, agentRole: nextTier.role };
       }
 
       lastResult.escalated = true;
@@ -413,9 +619,18 @@ class OrchestratorAgent {
     const start = Date.now();
     const agentRole = subtask.agentRole || 'builder';
 
+    // Xac dinh task type tu agentRole (khong dung model name)
+    const ROLE_TO_TASK = {
+      'architect': 'design', 'tech-lead': 'review', 'debugger': 'debug',
+      'reviewer': 'review', 'scanner': 'analyze', 'planner': 'plan',
+      'fe-dev': 'build', 'be-dev': 'build', 'builder': 'build',
+      'docs': 'docs'
+    };
+    const taskType = ROLE_TO_TASK[agentRole] || 'build';
+
     // Build structured context cho agent
     const structuredCtx = await this.contextManager.build({
-      task: subtask.model === 'smart' ? 'debug' : 'build',
+      task: taskType,
       description: subtask.description,
       files: subtask.files || [],
       feature: context.feature || null,
@@ -547,6 +762,24 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   }
 
   /**
+   * Escalation chain: cheap → default → smart → architect
+   * Tra ve tier cao hon hien tai
+   */
+  _getNextEscalationTier(currentModel) {
+    const ESCALATION_CHAIN = [
+      { model: 'cheap',     role: 'docs' },
+      { model: 'fast',      role: 'reviewer' },
+      { model: 'default',   role: 'builder' },
+      { model: 'smart',     role: 'tech-lead' },
+      { model: 'architect', role: 'architect' }
+    ];
+    const currentIndex = ESCALATION_CHAIN.findIndex(t => t.model === currentModel);
+    // Tra ve tier ke tiep, hoac architect neu da o cao nhat
+    const nextIndex = Math.min(currentIndex + 1, ESCALATION_CHAIN.length - 1);
+    return ESCALATION_CHAIN[nextIndex];
+  }
+
+  /**
    * Suy luận agentRole từ subtask nếu dispatcher không gán
    */
   _inferAgentRole(subtask) {
@@ -596,18 +829,117 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
     console.log(`🤖 Models: ${models_used.join(', ')}`);
     console.log(`🔒 Decisions locked: ${decisions_locked}`);
     console.log(`⏱️  ${elapsed_ms}ms`);
+    const budget = this.getBudgetStatus();
+    console.log(`💰 Budget: ${budget.spent} / ${budget.budget} (${budget.percent})`);
     console.log('='.repeat(50));
   }
 
   // =============================================
-  // MODEL CALL (giữ nguyên từ v1, thêm retry)
+  // BUDGET TRACKING — gioi han $2/ngay
+  // =============================================
+
+  /**
+   * Reset budget tracker neu sang ngay moi
+   */
+  _resetBudgetIfNewDay() {
+    const today = new Date().toISOString().split('T')[0];
+    if (this.budgetTracker.date !== today) {
+      console.log(`💰 Budget reset: new day ${today} (yesterday spent: $${this.budgetTracker.spent.toFixed(4)})`);
+      this.budgetTracker = { date: today, spent: 0, calls: {} };
+    }
+  }
+
+  /**
+   * Check con du budget truoc khi goi model
+   * Neu het budget → tu dong downgrade model
+   */
+  _checkBudget(model, estimatedTokens = 3000) {
+    this._resetBudgetIfNewDay();
+
+    const costPer1K = MODEL_COST_PER_1K[model] || 0.001;
+    const estimatedCost = costPer1K * (estimatedTokens / 1000);
+    const remaining = this.dailyBudget - this.budgetTracker.spent;
+
+    if (estimatedCost > remaining) {
+      // Tim model re hon co the dung
+      const DOWNGRADE_CHAIN = ['architect', 'smart', 'default', 'fast', 'cheap'];
+      const currentIndex = DOWNGRADE_CHAIN.indexOf(model);
+
+      for (let i = currentIndex + 1; i < DOWNGRADE_CHAIN.length; i++) {
+        const altModel = DOWNGRADE_CHAIN[i];
+        const altCost = (MODEL_COST_PER_1K[altModel] || 0.001) * (estimatedTokens / 1000);
+        if (altCost <= remaining) {
+          console.log(`💰 Budget guard: ${model} ($${estimatedCost.toFixed(4)}) vuot budget → downgrade ${altModel} ($${altCost.toFixed(4)})`);
+          console.log(`   Remaining: $${remaining.toFixed(4)} / $${this.dailyBudget}`);
+          return { model: altModel, downgraded: true, originalModel: model };
+        }
+      }
+
+      // Het sach budget
+      console.log(`⛔ Budget EXHAUSTED: $${this.budgetTracker.spent.toFixed(4)} / $${this.dailyBudget}. Khong the goi model nao.`);
+      return { model: null, downgraded: true, exhausted: true };
+    }
+
+    return { model, downgraded: false };
+  }
+
+  /**
+   * Ghi nhan chi phi sau khi goi model
+   */
+  _trackCost(model, tokens) {
+    const costPer1K = MODEL_COST_PER_1K[model] || 0.001;
+    const cost = costPer1K * (tokens / 1000);
+    this.budgetTracker.spent += cost;
+
+    if (!this.budgetTracker.calls[model]) {
+      this.budgetTracker.calls[model] = { count: 0, tokens: 0, cost: 0 };
+    }
+    this.budgetTracker.calls[model].count++;
+    this.budgetTracker.calls[model].tokens += tokens;
+    this.budgetTracker.calls[model].cost += cost;
+  }
+
+  /**
+   * Lay trang thai budget hien tai
+   */
+  getBudgetStatus() {
+    this._resetBudgetIfNewDay();
+    return {
+      date: this.budgetTracker.date,
+      spent: `$${this.budgetTracker.spent.toFixed(4)}`,
+      remaining: `$${(this.dailyBudget - this.budgetTracker.spent).toFixed(4)}`,
+      budget: `$${this.dailyBudget}`,
+      percent: `${Math.round((this.budgetTracker.spent / this.dailyBudget) * 100)}%`,
+      calls: this.budgetTracker.calls
+    };
+  }
+
+  // =============================================
+  // MODEL CALL (v2.1 — budget-aware)
   // =============================================
 
   async _callModel(model, systemPrompt, userContent) {
-    return this._callModelWithRetry(model, systemPrompt, userContent, 3);
+    // Budget check truoc khi goi
+    const budgetCheck = this._checkBudget(model);
+    if (budgetCheck.exhausted) {
+      throw new Error(`Budget exhausted: $${this.budgetTracker.spent.toFixed(2)} / $${this.dailyBudget}. Khong the goi model.`);
+    }
+    const actualModel = budgetCheck.model;
+
+    return this._callModelWithRetry(actualModel, systemPrompt, userContent, 3);
   }
 
   async _callModelWithRetry(model, systemPrompt, userContent, retries) {
+    // Dynamic max_tokens theo model tier
+    const MAX_TOKENS = {
+      'architect': 8000,  // Opus can nhieu token cho system design
+      'smart':     6000,  // Sonnet cho review/debug
+      'default':   4000,  // DeepSeek cho build
+      'fast':      3000,  // Gemini cho scan/review
+      'cheap':     2000   // GPT Mini cho docs/scan
+    };
+    const maxTokens = MAX_TOKENS[model] || 4000;
+
     const response = await fetch(`${this.litellmUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -620,7 +952,7 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent }
         ],
-        max_tokens: 4000,
+        max_tokens: maxTokens,
         temperature: 0.3
       })
     });
@@ -637,6 +969,11 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
       }
       throw new Error(errMsg);
     }
+
+    // Track chi phi thuc te
+    const usage = data.usage || {};
+    const totalTokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+    this._trackCost(model, totalTokens || Math.round((data.choices?.[0]?.message?.content || '').length / 4));
 
     return data.choices?.[0]?.message?.content || '';
   }

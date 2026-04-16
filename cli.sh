@@ -12,7 +12,7 @@
 # Models: default, smart, fast, cheap
 # ============================================
 
-PROXY="http://localhost:4001"
+PROXY="http://localhost:5002"
 KEY="sk-master-change-me"
 MODEL="${1:-default}"
 PROMPT="$2"
@@ -20,7 +20,7 @@ MAX_TOKENS="${3:-4000}"
 
 if [ -z "$PROMPT" ]; then
   echo "Usage: bash cli.sh <model> \"<prompt>\" [max_tokens]"
-  echo "Models: default (Kimi), smart (Sonnet), fast (Gemini), cheap (DeepSeek)"
+  echo "Models: default (DeepSeek), smart (Sonnet), fast (Gemini), cheap (GPT Mini), architect (Opus)"
   exit 1
 fi
 

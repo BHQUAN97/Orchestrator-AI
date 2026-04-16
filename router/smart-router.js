@@ -14,44 +14,73 @@
 // Moi model co strengths rieng — router match task voi strengths
 
 const MODEL_PROFILES = {
-  'gemini-flash': {
+  // === v2 lineup (2026-04-16) ===
+
+  'opus-4.6': {
+    litellm_name: 'architect',
+    strengths: ['architecture', 'spec', 'planning', 'debug_complex', 'refactor_large', 'security', 'multi_file', 'reasoning', 'frontend', 'backend', 'database', 'system_design', 'trade_off', 'mentoring'],
+    weaknesses: [],
+    max_context: 1000000,  // 1M tokens
+    cost_per_1m_input: 15.00,
+    speed: 'medium',
+    hallucination: 'very-low',
+    description: 'Opus 4.6 — SA tier, kien truc he thong, task cuc kho, huong dan smart tier'
+  },
+
+  'gemini-3-flash': {
     litellm_name: 'fast',
     strengths: ['context_analysis', 'multimodal', 'review', 'summarize', 'explain', 'translate', 'search'],
     weaknesses: ['complex_logic'],
     max_context: 1000000,  // 1M tokens
     cost_per_1m_input: 0.15,
     speed: 'fast',
-    description: 'Context lon, phan tich nhanh, multimodal'
+    hallucination: 'medium',
+    description: 'Gemini 3 Flash — context lon, scan nhanh, multimodal'
   },
 
-  'kimi-k2.5': {
+  'deepseek-v3.2': {
     litellm_name: 'default',
+    strengths: ['backend', 'frontend', 'nestjs', 'express', 'react', 'nextjs', 'api', 'database', 'sql', 'typeorm', 'drizzle', 'auth', 'middleware', 'migration', 'algorithm', 'logic', 'component'],
+    weaknesses: ['multimodal'],
+    max_context: 128000,
+    cost_per_1m_input: 0.30,
+    speed: 'medium',
+    hallucination: 'low-medium',
+    description: 'DeepSeek V3.2 — full-stack code gen, gia re, it drift'
+  },
+
+  'sonnet-4.6': {
+    litellm_name: 'smart',
+    strengths: ['architecture', 'spec', 'planning', 'debug_complex', 'refactor_large', 'security', 'multi_file', 'reasoning', 'frontend', 'backend'],
+    weaknesses: [],
+    max_context: 200000,
+    cost_per_1m_input: 3.00,
+    speed: 'medium',
+    hallucination: 'very-low',
+    description: 'Sonnet 4.6 — it ao giac nhat, reasoning sau, code manh'
+  },
+
+  'gpt-5.4-mini': {
+    litellm_name: 'cheap',
+    strengths: ['docs', 'comment', 'simple_fix', 'format', 'rename', 'summarize', 'explain'],
+    weaknesses: ['complex_logic', 'architecture'],
+    max_context: 128000,
+    cost_per_1m_input: 0.20,
+    speed: 'fast',
+    hallucination: 'medium',
+    description: 'GPT-5.4 Mini — re, nhanh, it bua hon model re khac'
+  },
+
+  // Legacy — giu lai de fallback
+  'kimi-k2.5': {
+    litellm_name: 'kimi',
     strengths: ['frontend', 'react', 'nextjs', 'vue', 'css', 'tailwind', 'ui', 'component', 'responsive', 'animation'],
     weaknesses: ['database', 'devops'],
     max_context: 128000,
     cost_per_1m_input: 1.00,
     speed: 'medium',
-    description: 'FE code: React, Next.js, Vue, UI/UX'
-  },
-
-  'deepseek': {
-    litellm_name: 'cheap',
-    strengths: ['backend', 'nestjs', 'express', 'api', 'database', 'sql', 'typeorm', 'drizzle', 'auth', 'middleware', 'migration', 'algorithm', 'logic'],
-    weaknesses: ['frontend', 'css', 'ui'],
-    max_context: 128000,
-    cost_per_1m_input: 0.27,
-    speed: 'medium',
-    description: 'BE code: NestJS, Express, DB, API'
-  },
-
-  'sonnet': {
-    litellm_name: 'smart',
-    strengths: ['architecture', 'spec', 'planning', 'debug_complex', 'refactor_large', 'security', 'multi_file', 'reasoning'],
-    weaknesses: [],
-    max_context: 200000,
-    cost_per_1m_input: 3.00,
-    speed: 'medium',
-    description: 'Kien truc, spec, debug phuc tap, reasoning sau'
+    hallucination: 'medium-high',
+    description: 'Kimi K2.5 — legacy fallback, hay bua API'
   },
 
   'local': {
@@ -61,6 +90,7 @@ const MODEL_PROFILES = {
     max_context: 32000,
     cost_per_1m_input: 0,  // Free — chay local
     speed: 'slow',
+    hallucination: 'high',
     description: 'Local model (LM Studio) — free, offline'
   }
 };
@@ -102,6 +132,15 @@ const FILE_DOMAIN = {
 
 // === Task Type → Required Strengths ===
 const TASK_STRENGTHS = {
+  // Pre-execution: scan + plan
+  'scan':         ['context_analysis', 'summarize', 'search', 'explain'],
+  'plan':         ['planning', 'architecture', 'context_analysis'],
+
+  // Architect-level commands
+  'architect':    ['system_design', 'architecture', 'trade_off', 'reasoning', 'planning', 'mentoring'],
+  'design':       ['system_design', 'architecture', 'trade_off', 'reasoning'],
+  'escalation':   ['debug_complex', 'reasoning', 'multi_file', 'system_design', 'mentoring'],
+
   // Agent commands
   'spec':         ['architecture', 'spec', 'planning', 'reasoning'],
   'build_fe':     ['frontend', 'react', 'nextjs', 'vue', 'component'],

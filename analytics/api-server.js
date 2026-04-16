@@ -18,8 +18,8 @@ const fs = require('fs');
 const path = require('path');
 const { CostTracker } = require('./tracker');
 
-const PORT = process.env.ANALYTICS_PORT || 9081;
-const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:4001';
+const PORT = process.env.ANALYTICS_PORT || 5004;
+const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:5002';
 const LITELLM_KEY = process.env.LITELLM_KEY || 'sk-master-change-me';
 
 const tracker = new CostTracker();
@@ -164,16 +164,21 @@ const server = http.createServer(async (req, res) => {
 
 // Uoc tinh cost chi tiet: input vs output
 function estimateCostDetailed(model, usage) {
-  // Gia per 1M tokens
+  // Gia per 1M tokens (v2.1 — 2026-04-16)
   const prices = {
-    'default': { in: 1.0, out: 4.0, cached: 0.10 },   // Kimi K2.5
-    'smart':   { in: 3.0, out: 15.0, cached: 0.30 },   // Sonnet
-    'fast':    { in: 0.15, out: 0.60, cached: 0.02 },   // Gemini Flash
-    'cheap':   { in: 0.27, out: 1.10, cached: 0.03 },   // DeepSeek
-    'kimi':    { in: 1.0, out: 4.0, cached: 0.10 },
-    'deepseek':{ in: 0.27, out: 1.10, cached: 0.03 },
-    'gemini':  { in: 0.15, out: 0.60, cached: 0.02 },
-    'sonnet':  { in: 3.0, out: 15.0, cached: 0.30 },
+    'architect':{ in: 15.0, out: 75.0, cached: 1.50 },  // Opus 4.6
+    'smart':    { in: 3.0, out: 15.0, cached: 0.30 },   // Sonnet 4.6
+    'default':  { in: 0.30, out: 1.20, cached: 0.03 },  // DeepSeek V3.2
+    'fast':     { in: 0.15, out: 0.60, cached: 0.02 },  // Gemini 3 Flash
+    'cheap':    { in: 0.20, out: 0.80, cached: 0.02 },  // GPT-5.4 Mini
+    // Direct aliases
+    'opus':     { in: 15.0, out: 75.0, cached: 1.50 },
+    'sonnet':   { in: 3.0, out: 15.0, cached: 0.30 },
+    'deepseek': { in: 0.30, out: 1.20, cached: 0.03 },
+    'gemini':   { in: 0.15, out: 0.60, cached: 0.02 },
+    'gpt-mini': { in: 0.20, out: 0.80, cached: 0.02 },
+    // Legacy
+    'kimi':     { in: 1.0, out: 4.0, cached: 0.10 },
   };
   const p = prices[model] || prices['default'];
   const tokens_in = usage.prompt_tokens || 0;

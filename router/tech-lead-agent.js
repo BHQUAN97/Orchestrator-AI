@@ -21,10 +21,10 @@
 const { DecisionLock } = require('./decision-lock');
 const { ContextManager } = require('./context-manager');
 
-const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:4001';
+const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:5002';
 const LITELLM_KEY = process.env.LITELLM_KEY || 'sk-master-change-me';
 
-// === Tech Lead System Prompt ===
+// === Tech Lead System Prompt (v2 — 2026-04-16) ===
 const TECH_LEAD_SYSTEM = `Bạn là Tech Lead (Senior Architect) trong hệ thống multi-model AI orchestration.
 
 VAI TRÒ CỦA BẠN:
@@ -33,6 +33,14 @@ VAI TRÒ CỦA BẠN:
 - Handle escalation từ dev agents khi họ gặp vấn đề khó
 - Lock các quyết định quan trọng để dev agents tuân theo
 - Đảm bảo consistency giữa frontend và backend
+- Escalate lên Architect (Opus) khi vượt quá khả năng
+
+MODEL LINEUP HIỆN TẠI:
+- architect (Opus 4.6): $15/1M — SA, system design, task cực khó. RẤT ĐẮT.
+- smart (Sonnet 4.6): $3/1M — Bạn đang dùng model này. Review, reasoning.
+- default (DeepSeek V3.2): $0.30/1M — Full-stack code gen. GIÁ VỪA.
+- fast (Gemini 3 Flash): $0.15/1M — Review, scan nhanh. RẺ.
+- cheap (GPT-5.4 Mini): $0.20/1M — Docs, format. RẺ NHẤT.
 
 NGUYÊN TẮC:
 1. KHÔNG tự implement code — chỉ review, decide, guide
@@ -42,21 +50,28 @@ NGUYÊN TẮC:
 5. Mỗi quyết định phải kèm LÝ DO ngắn gọn
 
 KHI REVIEW PLAN:
-- Check: task có đúng model không? (FE → Kimi, BE → DeepSeek, complex → Sonnet)
+- Check: task có đúng model không? (FE/BE → default, review → fast, debug → smart, design → architect)
 - Check: thứ tự dependencies có đúng? (DB trước API, API trước FE)
 - Check: có task nào thiếu? Có task nào dư?
 - Check: scope có vượt quá yêu cầu không?
 
 KHI HANDLE ESCALATION:
 - Đọc kỹ context: agent đã thử gì, lỗi gì
-- Quyết định 1 trong 3:
+- Quyết định 1 trong 4:
   a) GUIDE: Cho hướng giải quyết cụ thể → agent tiếp tục
   b) REDIRECT: Chuyển sang model khác phù hợp hơn
-  c) TAKE_OVER: Vấn đề quá phức tạp → Tech Lead tự xử lý (hiếm)
+  c) TAKE_OVER: Vấn đề quá phức tạp → Tech Lead tự xử lý
+  d) ESCALATE_ARCHITECT: Vượt quá khả năng → chuyển lên Opus (system design, trade-off cực kỳ phức tạp)
+
+KHI NÀO ESCALATE LÊN ARCHITECT:
+- System design cần nhìn toàn cảnh kiến trúc
+- Trade-off analysis giữa nhiều approach phức tạp
+- Quyết định ảnh hưởng dài hạn (DB schema lớn, microservice split)
+- Bạn (Sonnet) không đủ tự tin với quyết định
 
 OUTPUT FORMAT — LUÔN trả về JSON:
 {
-  "action": "approve|reject|modify|guide|redirect|take_over",
+  "action": "approve|reject|modify|guide|redirect|take_over|escalate_architect",
   "decisions": [
     {
       "decision": "Mô tả quyết định",
@@ -70,7 +85,7 @@ OUTPUT FORMAT — LUÔN trả về JSON:
   "notes": "Ghi chú thêm"
 }`;
 
-// === Escalation Handler Prompt ===
+// === Escalation Handler Prompt (v2 — 2026-04-16) ===
 const ESCALATION_SYSTEM = `Bạn là Tech Lead đang xử lý escalation từ dev agent.
 
 Dev agent đã gặp vấn đề KHÔNG TỰ GIẢI QUYẾT ĐƯỢC và escalate lên bạn.
@@ -78,17 +93,28 @@ Dev agent đã gặp vấn đề KHÔNG TỰ GIẢI QUYẾT ĐƯỢC và escalat
 NHIỆM VỤ:
 1. Phân tích vấn đề từ context agent gửi
 2. Xác định root cause hoặc hướng giải quyết
-3. Quyết định: GUIDE (cho hướng) | REDIRECT (chuyển model) | TAKE_OVER (tự làm)
+3. Quyết định action phù hợp
 
-NGUYÊN TẮC ESCALATION:
-- Ưu tiên GUIDE — để agent tự hoàn thành (rẻ hơn, nhanh hơn)
-- REDIRECT khi vấn đề thuộc domain khác (FE agent gặp vấn đề BE → redirect sang BE agent)
-- TAKE_OVER chỉ khi vấn đề cross-cutting, cần nhìn toàn cảnh
+CÁC ACTION (ưu tiên từ trên xuống):
+- GUIDE: Cho hướng cụ thể → agent tiếp tục (RẺ NHẤT)
+- REDIRECT: Chuyển sang model khác phù hợp hơn
+- TAKE_OVER: Bạn (Sonnet) tự xử lý
+- ESCALATE_ARCHITECT: Chuyển lên Opus 4.6 — CHỈ KHI:
+  + System design cần nhìn toàn cảnh
+  + Trade-off quá phức tạp cho Sonnet
+  + Quyết định ảnh hưởng dài hạn toàn hệ thống
+  + Đã TAKE_OVER nhưng vẫn không giải quyết được
+
+NGUYÊN TẮC:
+- Ưu tiên GUIDE (rẻ nhất, nhanh nhất)
+- REDIRECT khi vấn đề thuộc domain khác
+- TAKE_OVER khi cross-cutting, cần nhìn rộng
+- ESCALATE_ARCHITECT là lựa chọn CUỐI CÙNG (rất đắt: $15/1M tokens)
 - Mỗi escalation = 1 quyết định, KHÔNG để treo
 
 OUTPUT FORMAT — JSON:
 {
-  "action": "guide|redirect|take_over",
+  "action": "guide|redirect|take_over|escalate_architect",
   "analysis": "Phân tích ngắn gọn vấn đề",
   "rootCause": "Root cause (nếu xác định được)",
   "resolution": {
@@ -112,16 +138,18 @@ class TechLeadAgent {
   constructor(options = {}) {
     this.litellmUrl = options.litellmUrl || LITELLM_URL;
     this.litellmKey = options.litellmKey || LITELLM_KEY;
-    this.model = options.model || 'smart'; // Claude Sonnet — reasoning sâu
+    this.model = options.model || 'smart'; // Claude Sonnet 4.6 — review, reasoning
+    this.architectModel = options.architectModel || 'architect'; // Claude Opus 4.6 — SA tier
     this.decisionLock = options.decisionLock || new DecisionLock({ projectDir: options.projectDir });
     this.contextManager = options.contextManager || null;
 
-    // Thống kê
+    // Thong ke
     this.stats = {
       plansReviewed: 0,
       plansApproved: 0,
       plansRejected: 0,
       escalationsHandled: 0,
+      architectEscalations: 0,
       decisionsLocked: 0
     };
 
@@ -190,8 +218,35 @@ class TechLeadAgent {
   async handleEscalation(escalationData, context = {}) {
     this.stats.escalationsHandled++;
 
-    // Check escalation pattern — nếu cùng vấn đề lặp lại > 2 lần → TAKE_OVER
+    // Check escalation pattern — neu cung van de lap lai > 2 lan → TAKE_OVER hoac ESCALATE
     const repeated = this._checkRepeatedEscalation(escalationData);
+
+    // Neu da take_over truoc do ma van lap lai → tu dong escalate architect
+    if (repeated && repeated.count >= 2 && repeated.previous.some(p => p.action === 'take_over')) {
+      console.log(`⚠️  Repeated escalation (${repeated.count}x) + previous take_over failed → auto escalate_architect`);
+      const autoResolution = {
+        action: 'escalate_architect',
+        analysis: `Van de lap lai ${repeated.count} lan, take_over da that bai. Can Opus phan tich.`,
+        rootCause: 'Smart tier (Sonnet) khong giai quyet duoc',
+        resolution: {
+          steps: ['Chuyen len Architect (Opus 4.6) de phan tich toan canh'],
+          targetModel: 'architect',
+          newContext: `Previous attempts: ${repeated.previous.map(p => p.reason).join('; ')}`
+        },
+        decisions: []
+      };
+
+      this.escalationHistory.push({
+        timestamp: new Date().toISOString(),
+        from: escalationData.fromAgent,
+        reason: escalationData.reason,
+        action: 'escalate_architect',
+        resolved: false,
+        auto: true
+      });
+
+      return autoResolution;
+    }
 
     const prompt = this._buildEscalationPrompt(escalationData, context, repeated);
     const response = await this._callModel(ESCALATION_SYSTEM, prompt);
@@ -200,9 +255,9 @@ class TechLeadAgent {
     if (!resolution) {
       return {
         action: 'guide',
-        analysis: 'Không parse được Tech Lead response',
+        analysis: 'Khong parse duoc Tech Lead response',
         resolution: {
-          steps: ['Retry task với context chi tiết hơn'],
+          steps: ['Retry task voi context chi tiet hon'],
           targetModel: null,
           newContext: ''
         },
@@ -210,14 +265,14 @@ class TechLeadAgent {
       };
     }
 
-    // Lock decisions nếu có
+    // Lock decisions neu co
     if (resolution.decisions) {
       for (const dec of resolution.decisions) {
         if (dec.lock) {
           this.decisionLock.lock({
             decision: dec.decision,
             scope: dec.scope,
-            approvedBy: 'tech-lead',
+            approvedBy: resolution.action === 'escalate_architect' ? 'architect' : 'tech-lead',
             reason: dec.reason || 'Escalation resolution'
           });
           this.stats.decisionsLocked++;
@@ -225,7 +280,7 @@ class TechLeadAgent {
       }
     }
 
-    // Lưu vào history
+    // Luu vao history
     this.escalationHistory.push({
       timestamp: new Date().toISOString(),
       from: escalationData.fromAgent,
@@ -244,13 +299,22 @@ class TechLeadAgent {
   quickReview(plan) {
     const issues = [];
 
-    // Check 1: model assignment hợp lý
+    // Check 1: model assignment hop ly
     for (const subtask of (plan.subtasks || [])) {
-      if (subtask.model === 'smart' && /\b(docs|comment|format|rename)\b/i.test(subtask.description)) {
-        issues.push(`Task ${subtask.id}: "${subtask.description}" dùng model smart (đắt) cho task đơn giản → nên dùng cheap`);
+      const desc = subtask.description || '';
+      // Model qua dat cho task don gian
+      if (subtask.model === 'architect' && /\b(docs|comment|format|rename|cleanup)\b/i.test(desc)) {
+        issues.push(`Task ${subtask.id}: dung architect (rat dat) cho task don gian → nen dung cheap`);
       }
-      if (subtask.model === 'cheap' && /\b(architect|security|spec|design)\b/i.test(subtask.description)) {
-        issues.push(`Task ${subtask.id}: "${subtask.description}" dùng model cheap cho task phức tạp → nên dùng smart`);
+      if (subtask.model === 'smart' && /\b(docs|comment|format|rename)\b/i.test(desc)) {
+        issues.push(`Task ${subtask.id}: dung smart (dat) cho task don gian → nen dung cheap`);
+      }
+      // Model qua yeu cho task phuc tap
+      if (subtask.model === 'cheap' && /\b(architect|security|spec|design|system)\b/i.test(desc)) {
+        issues.push(`Task ${subtask.id}: dung cheap cho task phuc tap → nen dung smart hoac architect`);
+      }
+      if (subtask.model === 'default' && /\b(system.design|architecture|trade.?off)\b/i.test(desc)) {
+        issues.push(`Task ${subtask.id}: dung default cho system design → nen dung architect`);
       }
     }
 
@@ -430,7 +494,10 @@ class TechLeadAgent {
     return null;
   }
 
-  async _callModel(systemPrompt, userContent) {
+  async _callModel(systemPrompt, userContent, useArchitect = false) {
+    const model = useArchitect ? this.architectModel : this.model;
+    if (useArchitect) this.stats.architectEscalations++;
+
     const response = await fetch(`${this.litellmUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -438,13 +505,13 @@ class TechLeadAgent {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: this.model,
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent }
         ],
-        max_tokens: 4000,
-        temperature: 0.2 // Thấp hơn dev agents — cần decisions ổn định
+        max_tokens: useArchitect ? 8000 : 4000, // Architect can nhieu token hon
+        temperature: 0.2
       })
     });
 
