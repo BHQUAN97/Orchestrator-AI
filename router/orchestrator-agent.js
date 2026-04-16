@@ -28,6 +28,7 @@ const { SmartRouter } = require('./smart-router');
 const { ContextManager } = require('./context-manager');
 const { DecisionLock } = require('./decision-lock');
 const { TechLeadAgent } = require('./tech-lead-agent');
+const { PipelineTracer } = require('../lib/pipeline-tracer');
 
 const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:5002';
 const LITELLM_KEY = process.env.LITELLM_KEY || 'sk-master-change-me';
@@ -153,6 +154,12 @@ class OrchestratorAgent {
       calls: {}  // { model: { count, tokens, cost } }
     };
 
+    // Async mutex cho budget operations — tranh race condition khi parallel tasks
+    this._budgetLock = Promise.resolve();
+
+    // Load budget tu disk (persist qua process restart)
+    this._loadBudget();
+
     // Core modules
     this.smartRouter = new SmartRouter({
       availableModels: options.availableModels || ['opus-4.6', 'sonnet-4.6', 'deepseek-v3.2', 'gemini-3-flash', 'gpt-5.4-mini'],
@@ -181,11 +188,41 @@ class OrchestratorAgent {
 
     // Logging
     this.executionLog = [];
+
+    // Pipeline Tracer — unified tracing cho debug
+    this.tracer = new PipelineTracer({
+      maxTraces: options.maxTraces || 100,
+      logDir: options.traceLogDir || require('path').join(this.projectDir, 'data', 'traces')
+    });
   }
 
   // =============================================
-  // FLOW CHINH: scan → plan → review → execute → synthesize
+  // FLOW CHINH: classify → scan → plan → review → execute → synthesize
   // =============================================
+
+  /**
+   * Pre-classify task bang SLM — quyet dinh fast-path hay full-path
+   * Chi phi: ~$0.00005 (50 tokens, cheap model), latency ~200-500ms
+   */
+  async _classifyTask(userPrompt, context = {}) {
+    try {
+      if (!this._slmClassifier) {
+        const { SLMClassifier } = require('./slm-classifier');
+        this._slmClassifier = new SLMClassifier({
+          litellmUrl: this.litellmUrl,
+          litellmKey: this.litellmKey
+        });
+      }
+      return await this._slmClassifier.classify({
+        task: context.task || '',
+        files: context.files || [],
+        prompt: userPrompt,
+        project: context.project || ''
+      });
+    } catch {
+      return null; // SLM fail → fallback ve full flow
+    }
+  }
 
   /**
    * Buoc 1a: Scanner quet project — thu thap context thuc te (cheap, re)
@@ -221,9 +258,10 @@ class OrchestratorAgent {
     console.log('🔍 Scanner: quet project...');
     const response = await this._callModel('cheap', SCANNER_SYSTEM, prompt);
 
-    try {
-      return JSON.parse(response.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
-    } catch {
+    const parsed = this._parseModelJSON(response);
+    if (parsed) {
+      return parsed;
+    } else {
       console.log('⚠️  Scanner JSON parse failed, dung basic scan');
       return {
         stack: structuredCtx.project.stack || [],
@@ -245,31 +283,39 @@ class OrchestratorAgent {
     const path = require('path');
     const parts = [];
 
-    // 1. Doc package.json
-    try {
-      const pkgPath = path.join(this.projectDir, 'package.json');
-      if (fs.existsSync(pkgPath)) {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        parts.push(`[package.json] name=${pkg.name}, deps: ${Object.keys(pkg.dependencies || {}).slice(0, 20).join(', ')}`);
-        if (pkg.devDependencies) {
-          parts.push(`  devDeps: ${Object.keys(pkg.devDependencies).slice(0, 10).join(', ')}`);
+    // Micro-scan: khi user chi dinh files cu the → chi doc files do, skip folder tree
+    const microScan = hintFiles.length > 0;
+
+    if (!microScan) {
+      // Full scan: doc package.json + folder tree (khi khong co hint files)
+      // 1. Doc package.json
+      try {
+        const pkgPath = path.join(this.projectDir, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          parts.push(`[package.json] name=${pkg.name}, deps: ${Object.keys(pkg.dependencies || {}).slice(0, 20).join(', ')}`);
+          if (pkg.devDependencies) {
+            parts.push(`  devDeps: ${Object.keys(pkg.devDependencies).slice(0, 10).join(', ')}`);
+          }
         }
-      }
-    } catch { /* ignore */ }
+      } catch { /* ignore */ }
 
-    // 2. Doc folder structure (depth 2, max 50 entries)
-    try {
-      const tree = this._listDir(this.projectDir, 2, 50);
-      parts.push(`\n[Folder structure]\n${tree}`);
-    } catch { /* ignore */ }
+      // 2. Doc folder structure (depth 2, max 50 entries)
+      try {
+        const tree = this._listDir(this.projectDir, 2, 50);
+        parts.push(`\n[Folder structure]\n${tree}`);
+      } catch { /* ignore */ }
+    }
 
-    // 3. Doc hint files (dau 50 dong moi file)
-    for (const file of hintFiles.slice(0, 5)) {
+    // 3. Doc hint files — micro-scan doc nhieu hon (80 dong, 8 files)
+    const maxFiles = microScan ? 8 : 5;
+    const maxLines = microScan ? 80 : 50;
+    for (const file of hintFiles.slice(0, maxFiles)) {
       try {
         const fullPath = path.isAbsolute(file) ? file : path.join(this.projectDir, file);
         if (fs.existsSync(fullPath)) {
           const content = fs.readFileSync(fullPath, 'utf8');
-          const lines = content.split('\n').slice(0, 50).join('\n');
+          const lines = content.split('\n').slice(0, maxLines).join('\n');
           parts.push(`\n[${file}] (${content.split('\n').length} lines)\n${lines}`);
         }
       } catch { /* ignore */ }
@@ -344,9 +390,8 @@ class OrchestratorAgent {
     const plannerModel = scanResults.estimated_complexity === 'very_high' ? 'smart' : 'default';
     const response = await this._callModel(plannerModel, PLANNER_SYSTEM, prompt);
 
-    try {
-      const plan = JSON.parse(response.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
-
+    const plan = this._parseModelJSON(response);
+    if (plan && plan.subtasks) {
       // Dam bao moi subtask co agentRole va model
       for (const subtask of plan.subtasks) {
         if (!subtask.agentRole) {
@@ -361,7 +406,7 @@ class OrchestratorAgent {
       plan.scanResults = scanResults;
 
       return plan;
-    } catch (e) {
+    } else {
       // Fallback: dung SmartRouter
       console.log('⚠️  Planner JSON parse failed, fallback to SmartRouter');
       const routeResult = this.smartRouter.route({
@@ -482,35 +527,98 @@ class OrchestratorAgent {
    * Full flow: plan → review → execute
    */
   async run(userPrompt, context = {}) {
-    // Buoc 1: Scan + Plan (scan chay ben trong plan() neu chua co)
-    console.log('🔍 Step 1: Scan & Plan...');
-    const plan = await this.plan(userPrompt, context);
+    // Tao trace moi cho toan bo pipeline
+    const trace = this.tracer.start('run', {
+      prompt: userPrompt.slice(0, 200),
+      files: context.files?.length || 0,
+      project: context.project || ''
+    });
 
-    // Buoc 2: Tech Lead review
-    console.log('🧠 Step 2: Tech Lead review...');
-    const reviewResult = await this.review(plan, context);
+    try {
+      // Buoc 0: Pre-classify bang SLM — quyet dinh fast-path
+      trace.step('classify', { model: 'cheap' });
+      const classification = await this._classifyTask(userPrompt, context);
+      const isSimple = classification && classification.complexity === 'simple';
+      trace.stepDone('classify', { complexity: classification?.complexity, fast_path: isSimple });
 
-    if (reviewResult.action === 'reject') {
-      console.log('❌ Plan REJECTED by Tech Lead');
-      return {
-        status: 'rejected',
-        reason: reviewResult.guidance || 'Tech Lead rejected plan',
-        plan,
-        review: reviewResult
-      };
+      // Buoc 1: Scan + Plan
+      trace.step('scan', { model: isSimple ? 'cheap' : 'default' });
+      let plan;
+      try {
+        if (isSimple && (context.files || []).length > 0) {
+          // Fast-path: skip scan rieng, plan truc tiep voi micro-scan data
+          plan = await this.plan(userPrompt, { ...context, scanResults: null });
+        } else {
+          plan = await this.plan(userPrompt, context);
+        }
+        trace.stepDone('scan', { subtasks: plan.subtasks?.length });
+      } catch (err) {
+        trace.stepFail('scan', err, { model: 'cheap' });
+        const summary = this.tracer.finish(trace);
+        return { status: 'error', ...summary.error_attribution, trace: summary };
+      }
+
+      // Buoc 2: Tech Lead review (skip cho simple tasks)
+      let approvedPlan = plan;
+      if (isSimple) {
+        trace.step('review', { model: 'skip' });
+        trace.stepDone('review', { action: 'auto_approve', reason: 'simple task' });
+      } else {
+        trace.step('review', { model: 'smart' });
+        let reviewResult;
+        try {
+          reviewResult = await this.review(plan, context);
+          trace.stepDone('review', { action: reviewResult.action });
+        } catch (err) {
+          trace.stepFail('review', err, { model: 'smart' });
+          const summary = this.tracer.finish(trace);
+          return { status: 'error', ...summary.error_attribution, trace: summary };
+        }
+
+        if (reviewResult.action === 'reject') {
+          trace.warn('review', `Plan REJECTED: ${reviewResult.guidance || 'no reason'}`);
+          const summary = this.tracer.finish(trace);
+          return {
+            status: 'rejected',
+            reason: reviewResult.guidance || 'Tech Lead rejected plan',
+            plan,
+            review: reviewResult,
+            trace: summary
+          };
+        }
+
+        approvedPlan = reviewResult.plan || plan;
+      }
+
+      // Buoc 3: Execute
+      trace.step('execute', { subtasks: approvedPlan.subtasks?.length });
+      let execution;
+      try {
+        execution = await this.execute(approvedPlan, context);
+        trace.stepDone('execute', {
+          success: true,
+          models_used: execution.models_used
+        });
+      } catch (err) {
+        trace.stepFail('execute', err);
+        const summary = this.tracer.finish(trace);
+        return { status: 'error', ...summary.error_attribution, trace: summary };
+      }
+
+      // Report
+      this._printReport(execution);
+
+      // Finish trace
+      const summary = this.tracer.finish(trace, execution);
+      execution.trace = summary;
+
+      return execution;
+    } catch (err) {
+      // Catch-all — bat loi khong du doan
+      trace.stepFail('unknown', err);
+      const summary = this.tracer.finish(trace);
+      return { status: 'error', ...summary.error_attribution, trace: summary };
     }
-
-    // Dùng plan đã modify (nếu có)
-    const approvedPlan = reviewResult.plan || plan;
-
-    // Bước 3: Execute
-    console.log('⚡ Step 3: Executing...');
-    const execution = await this.execute(approvedPlan, context);
-
-    // Report
-    this._printReport(execution);
-
-    return execution;
   }
 
   // =============================================
@@ -675,16 +783,104 @@ class OrchestratorAgent {
       console.log(`✅ [${subtask.id}] Done (${result.elapsed_ms}ms, ~${result.tokens} tokens)`);
       return result;
     } catch (err) {
-      console.log(`❌ [${subtask.id}] Error: ${err.message}`);
-      return {
+      const errorMsg = err.message || String(err);
+      console.log(`❌ [${subtask.id}] Error: ${errorMsg}`);
+
+      // Log structured error cho debugging
+      const result = {
         id: subtask.id,
         model: subtask.model,
         agentRole,
-        output: `Error: ${err.message}`,
+        output: `Error: ${errorMsg}`,
         elapsed_ms: Date.now() - start,
-        success: false
+        success: false,
+        // Error attribution — de trace biet step nao fail
+        errorDetail: {
+          step: 'subtask',
+          subtaskId: subtask.id,
+          model: subtask.model,
+          agentRole,
+          message: errorMsg,
+          files: subtask.files || []
+        }
       };
+      return result;
     }
+  }
+
+  // =============================================
+  // JSON PARSING — robust handler cho model output
+  // =============================================
+
+  /**
+   * Parse JSON tu model response — xu ly cac truong hop loi pho bien:
+   * 1. Markdown code blocks (co the nested)
+   * 2. Trailing commas truoc } va ]
+   * 3. JS-style comments (single-line // va multi-line block comments)
+   * 4. JSON nam giua text khac
+   * Tra ve parsed object hoac null neu khong parse duoc
+   */
+  _parseModelJSON(response) {
+    if (!response || typeof response !== 'string') return null;
+
+    let cleaned = response;
+
+    // 1. Strip markdown code blocks (handle nested — xoa ngoai cung truoc)
+    // Loai bo ```json ... ``` va ``` ... ```
+    cleaned = cleaned.replace(/```(?:json|javascript|js)?\s*\n?([\s\S]*?)```/g, '$1');
+
+    cleaned = cleaned.trim();
+
+    // 2. Xoa JS-style comments — CHI ngoai string (tranh pha URL trong JSON)
+    // Multi-line comments: /* ... */ (an toan vi khong xuat hien trong JSON values)
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Single-line comments: chi xoa neu o dau dong hoac sau whitespace (khong phai trong string)
+    // Tranh pha "https://..." trong JSON values
+    cleaned = cleaned.replace(/^\s*\/\/[^\n]*/gm, '');
+
+    // 3. Xoa trailing commas truoc } va ]
+    cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+    // 4. Thu JSON.parse truc tiep
+    try {
+      return JSON.parse(cleaned);
+    } catch { /* tiep tuc thu cach khac */ }
+
+    // 5. Tim va extract JSON block dau tien bang brace matching
+    const startChars = ['{', '['];
+    for (const startChar of startChars) {
+      const endChar = startChar === '{' ? '}' : ']';
+      const startIndex = cleaned.indexOf(startChar);
+      if (startIndex === -1) continue;
+
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+
+      for (let i = startIndex; i < cleaned.length; i++) {
+        const ch = cleaned[i];
+
+        if (escape) { escape = false; continue; }
+        if (ch === '\\') { escape = true; continue; }
+
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+
+        if (ch === startChar) depth++;
+        if (ch === endChar) depth--;
+
+        if (depth === 0) {
+          let block = cleaned.slice(startIndex, i + 1);
+          // Xoa trailing commas trong block
+          block = block.replace(/,\s*([}\]])/g, '$1');
+          try {
+            return JSON.parse(block);
+          } catch { break; } // Block nay khong hop le, thu startChar tiep theo
+        }
+      }
+    }
+
+    return null;
   }
 
   // =============================================
@@ -835,6 +1031,54 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   }
 
   // =============================================
+  // BUDGET LOCK — async mutex cho budget operations
+  // =============================================
+
+  /**
+   * Async mutex pattern — dam bao chi 1 budget operation chay tai 1 thoi diem
+   * Tranh race condition khi Promise.all chay nhieu subtask song song
+   */
+  async _withBudgetLock(fn) {
+    const release = this._budgetLock;
+    let resolve;
+    this._budgetLock = new Promise(r => { resolve = r; });
+    await release;
+    try { return await fn(); } finally { resolve(); }
+  }
+
+  // =============================================
+  // BUDGET PERSISTENCE — luu/doc tu disk
+  // =============================================
+
+  _getBudgetPath() {
+    return require('path').join(this.projectDir, 'data', 'budget-tracker.json');
+  }
+
+  /**
+   * Load budget tu disk — giu chi phi khi restart process
+   * Chi load neu cung ngay, khac ngay → reset ve 0
+   */
+  _loadBudget() {
+    try {
+      const data = JSON.parse(require('fs').readFileSync(this._getBudgetPath(), 'utf8'));
+      if (data.date === new Date().toISOString().split('T')[0]) {
+        this.budgetTracker = data;
+      }
+    } catch { /* first run hoac file corrupt — dung defaults */ }
+  }
+
+  /**
+   * Luu budget xuong disk sau moi lan track cost
+   */
+  _saveBudget() {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.dirname(this._getBudgetPath());
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(this._getBudgetPath(), JSON.stringify(this.budgetTracker, null, 2));
+  }
+
+  // =============================================
   // BUDGET TRACKING — gioi han $2/ngay
   // =============================================
 
@@ -880,23 +1124,32 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
       return { model: null, downgraded: true, exhausted: true };
     }
 
-    return { model, downgraded: false };
+    // Reserve estimated cost — tranh race condition khi parallel tasks
+    const reservedCost = costPer1K * (estimatedTokens / 1000);
+    this.budgetTracker.spent += reservedCost;
+    this._saveBudget();
+    return { model, downgraded: false, reservedCost };
   }
 
   /**
    * Ghi nhan chi phi sau khi goi model
    */
-  _trackCost(model, tokens) {
+  _trackCost(model, tokens, reservedCost = 0) {
     const costPer1K = MODEL_COST_PER_1K[model] || 0.001;
-    const cost = costPer1K * (tokens / 1000);
-    this.budgetTracker.spent += cost;
+    const actualCost = costPer1K * (tokens / 1000);
+    // Reconcile: tra lai reserved, ghi nhan actual
+    const delta = actualCost - reservedCost;
+    this.budgetTracker.spent += delta;
 
     if (!this.budgetTracker.calls[model]) {
       this.budgetTracker.calls[model] = { count: 0, tokens: 0, cost: 0 };
     }
     this.budgetTracker.calls[model].count++;
     this.budgetTracker.calls[model].tokens += tokens;
-    this.budgetTracker.calls[model].cost += cost;
+    this.budgetTracker.calls[model].cost += actualCost;
+
+    // Persist xuong disk sau moi lan track
+    this._saveBudget();
   }
 
   /**
@@ -919,17 +1172,18 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   // =============================================
 
   async _callModel(model, systemPrompt, userContent) {
-    // Budget check truoc khi goi
-    const budgetCheck = this._checkBudget(model);
+    // Budget check truoc khi goi — dung lock tranh race condition
+    const budgetCheck = await this._withBudgetLock(() => this._checkBudget(model));
     if (budgetCheck.exhausted) {
       throw new Error(`Budget exhausted: $${this.budgetTracker.spent.toFixed(2)} / $${this.dailyBudget}. Khong the goi model.`);
     }
     const actualModel = budgetCheck.model;
+    const reservedCost = budgetCheck.reservedCost || 0;
 
-    return this._callModelWithRetry(actualModel, systemPrompt, userContent, 3);
+    return this._callModelWithRetry(actualModel, systemPrompt, userContent, 3, reservedCost);
   }
 
-  async _callModelWithRetry(model, systemPrompt, userContent, retries) {
+  async _callModelWithRetry(model, systemPrompt, userContent, retries, reservedCost = 0) {
     // Dynamic max_tokens theo model tier
     const MAX_TOKENS = {
       'architect': 8000,  // Opus can nhieu token cho system design
@@ -962,18 +1216,18 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
     if (data.error) {
       const errMsg = data.error.message || JSON.stringify(data.error);
       if (retries > 0 && (errMsg.includes('429') || errMsg.includes('RateLimit') || errMsg.includes('quota'))) {
-        const waitSec = Math.min(60, 20 * (4 - retries));
+        const waitSec = Math.min(30, 2 ** (4 - retries));
         console.log(`⏳ Rate limited, waiting ${waitSec}s... (${retries} retries left)`);
         await new Promise(r => setTimeout(r, waitSec * 1000));
-        return this._callModelWithRetry(model, systemPrompt, userContent, retries - 1);
+        return this._callModelWithRetry(model, systemPrompt, userContent, retries - 1, reservedCost);
       }
       throw new Error(errMsg);
     }
 
-    // Track chi phi thuc te
+    // Track chi phi thuc te — dung lock tranh race condition
     const usage = data.usage || {};
     const totalTokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
-    this._trackCost(model, totalTokens || Math.round((data.choices?.[0]?.message?.content || '').length / 4));
+    await this._withBudgetLock(() => this._trackCost(model, totalTokens || Math.round((data.choices?.[0]?.message?.content || '').length / 4), reservedCost));
 
     return data.choices?.[0]?.message?.content || '';
   }
