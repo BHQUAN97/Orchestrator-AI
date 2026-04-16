@@ -12,6 +12,28 @@ const PASSWORD = process.env.AUTH_PASSWORD || 'admin';
 const SECRET = process.env.JWT_SECRET || 'orcai-dev-secret-change-me';
 const TOKEN_TTL = 24 * 60 * 60 * 1000; // 24h
 const COOKIE_NAME = 'orcai_token';
+const MAX_BODY_BYTES = 10 * 1024; // 10KB — chong DoS qua large body
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Production: tu choi khoi dong neu con default credentials/secret
+if (IS_PROD) {
+  const insecure = [];
+  if (!process.env.AUTH_USERNAME || USERNAME === 'admin') insecure.push('AUTH_USERNAME (still "admin")');
+  if (!process.env.AUTH_PASSWORD || PASSWORD === 'admin') insecure.push('AUTH_PASSWORD (still "admin")');
+  if (!process.env.JWT_SECRET || SECRET === 'orcai-dev-secret-change-me') insecure.push('JWT_SECRET (still default)');
+  if (insecure.length) {
+    console.error('[Auth] FATAL: insecure defaults in production:');
+    insecure.forEach(r => console.error('  - ' + r));
+    process.exit(1);
+  }
+}
+
+// Timing-safe compare an toan voi length khac nhau (hash truoc → fixed-length buffer)
+function safeCompare(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a == null ? '' : a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b == null ? '' : b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
 // Tao token don gian bang HMAC — khong can JWT library
 function createToken(username) {
@@ -37,10 +59,20 @@ function verifyToken(token) {
 }
 
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', c => data += c);
+    let size = 0;
+    req.on('data', c => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error('PAYLOAD_TOO_LARGE'));
+        return;
+      }
+      data += c;
+    });
     req.on('end', () => resolve(data));
+    req.on('error', reject);
   });
 }
 
@@ -57,7 +89,15 @@ const server = http.createServer(async (req, res) => {
 
   // --- POST /auth/login ---
   if (req.method === 'POST' && url.pathname === '/auth/login') {
-    const body = await readBody(req);
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (err) {
+      const code = err.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400;
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: err.message }));
+    }
+
     let username, password;
     try {
       const json = JSON.parse(body);
@@ -68,14 +108,13 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ error: 'Invalid JSON' }));
     }
 
-    // Timing-safe compare
-    const userOk = username === USERNAME;
-    const passOk = crypto.timingSafeEqual(
-      Buffer.from(password || ''),
-      Buffer.from(PASSWORD)
-    );
+    // Timing-safe compare — hash truoc nen khong crash khi length khac
+    const userOk = safeCompare(username, USERNAME);
+    const passOk = safeCompare(password, PASSWORD);
 
     if (!userOk || !passOk) {
+      const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').toString().split(',')[0].trim();
+      console.warn(`[Auth] Login failed for "${String(username || '').slice(0, 32)}" from ${ip}`);
       res.writeHead(401, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: 'Invalid credentials' }));
     }

@@ -142,9 +142,13 @@ services:
     ports:
       - "${GATEWAY_PORT:-5005}:80"
     volumes:
-      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf.template:ro
       - ./gateway/login.html:/usr/share/nginx/html/login.html:ro
       - ./gateway/portal.html:/usr/share/nginx/html/portal.html:ro
+    environment:
+      - LITELLM_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+    # Render template voi envsubst — chi thay $LITELLM_KEY, giu nguyen nginx vars khac
+    command: ["sh", "-c", "envsubst '$$LITELLM_KEY' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"]
     depends_on:
       - auth
       - litellm
