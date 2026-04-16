@@ -364,7 +364,9 @@ const server = http.createServer(async (req, res) => {
     // POST /api/route — Smart router: chon model phu hop
     // Dung SLM classifier neu co, fallback ve heuristic
     if (url.pathname === '/api/route') {
-      const router = new SmartRouter({ costOptimize: true });
+      // Singleton: tranh tao SmartRouter moi cho moi request (waste GC + classifier cache)
+      if (!global._sharedRouter) global._sharedRouter = new SmartRouter({ costOptimize: true });
+      const router = global._sharedRouter;
       const routeParams = {
         task: body.task || '',
         files: sanitizeFileList(body.files),

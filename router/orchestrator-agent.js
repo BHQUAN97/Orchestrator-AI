@@ -943,7 +943,12 @@ class OrchestratorAgent {
   _parseModelJSON(response) {
     if (!response || typeof response !== 'string') return null;
 
-    let cleaned = response;
+    // Fast-path: thu parse truc tiep tren response da trim — tranh 4 regex pass
+    // Khi LLM tuan thu prompt "ONLY JSON", hau het response sach. Hit rate ~70-80%.
+    const trimmed = response.trim();
+    try { return JSON.parse(trimmed); } catch { /* tiep tuc slow-path */ }
+
+    let cleaned = trimmed;
 
     // 1. Strip markdown code blocks (handle nested — xoa ngoai cung truoc)
     // Loai bo ```json ... ``` va ``` ... ```
@@ -961,10 +966,10 @@ class OrchestratorAgent {
     // 3. Xoa trailing commas truoc } va ]
     cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
 
-    // 4. Thu JSON.parse truc tiep
+    // 4. Thu JSON.parse sau khi clean
     try {
       return JSON.parse(cleaned);
-    } catch { /* tiep tuc thu cach khac */ }
+    } catch { /* tiep tuc thu brace-matching */ }
 
     // 5. Tim va extract JSON block dau tien bang brace matching
     const startChars = ['{', '['];
