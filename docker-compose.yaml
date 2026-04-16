@@ -34,7 +34,9 @@ services:
       --num_workers 2
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      # /health (default) yeu cau API key → 401 → unhealthy false-alarm.
+      # /health/liveliness public, no auth — dung de check container alive.
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -101,12 +103,15 @@ services:
       - /e/DEVELOP/LeQuyDon:/projects/LeQuyDon
       - /e/DEVELOP/WebPhoto:/projects/WebPhoto
       - /e/DEVELOP/RemoteTerminal:/projects/RemoteTerminal
-    command: ["node", "src/api-server.js"]
+    # apk add git: alpine khong co git → getGitInfo() trong context-manager fail moi call
+    # → meta cache van work nhung cost 1 spawn fail moi 60s + bao "unknown" branch
+    command: ["sh", "-c", "apk add --no-cache git >/dev/null 2>&1 && node src/api-server.js"]
     environment:
       - PORT=5003
       - LITELLM_URL=http://litellm:4000
       - LITELLM_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
       - DAILY_BUDGET=2.00
+      - TZ=${TZ:-Asia/Ho_Chi_Minh}
     depends_on:
       - litellm
     restart: unless-stopped

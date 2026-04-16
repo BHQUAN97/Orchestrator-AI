@@ -186,6 +186,30 @@ assert('Spent increased after reserve', agent.budgetTracker.spent > before);
 agent.budgetTracker.spent = Math.max(0, agent.budgetTracker.spent - reserved);
 assert('Spent restored after refund', agent.budgetTracker.spent === before);
 
+// === Budget TZ awareness (real-test fix) ===
+console.log('\n=== Budget TZ ===\n');
+
+// Test: _todayInTz tra ve ngay theo TZ cau hinh
+console.log('Test BTZ-1: ICT date');
+delete require.cache[require.resolve('../router/orchestrator-agent')];
+const { OrchestratorAgent: OA1 } = require('../router/orchestrator-agent');
+const aICT = new OA1({ projectDir: path.join(testDir, 'tz-ict'), budgetTz: 'Asia/Ho_Chi_Minh' });
+const ictDate = aICT._todayInTz();
+assert('ICT date format YYYY-MM-DD', /^\d{4}-\d{2}-\d{2}$/.test(ictDate));
+
+console.log('\nTest BTZ-2: UTC date');
+const aUTC = new OA1({ projectDir: path.join(testDir, 'tz-utc'), budgetTz: 'UTC' });
+const utcDate = aUTC._todayInTz();
+assert('UTC date format YYYY-MM-DD', /^\d{4}-\d{2}-\d{2}$/.test(utcDate));
+
+console.log('\nTest BTZ-3: Invalid TZ fallback');
+const aBad = new OA1({ projectDir: path.join(testDir, 'tz-bad'), budgetTz: 'Not/A_Zone' });
+const badDate = aBad._todayInTz();
+assert('Invalid TZ fallback to ISO date', /^\d{4}-\d{2}-\d{2}$/.test(badDate));
+
+console.log('\nTest BTZ-4: Budget date dung TZ tai constructor');
+assert('budgetTracker.date = today in configured TZ', aICT.budgetTracker.date === ictDate);
+
 // === ContextManager meta cache (round 3) ===
 console.log('\n=== ContextManager meta cache ===\n');
 

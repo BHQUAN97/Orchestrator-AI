@@ -147,9 +147,11 @@ class OrchestratorAgent {
     this.dispatcherModel = options.dispatcherModel || 'fast';
     this.dailyBudget = options.dailyBudget || DAILY_BUDGET;
 
-    // Budget tracking
+    // Budget tracking — date theo BUDGET_TZ (default Asia/Ho_Chi_Minh) chu khong UTC.
+    // Container chay UTC nhung user VN reset budget luc 0h ICT, khong phai 7h ICT.
+    this._budgetTz = options.budgetTz || process.env.BUDGET_TZ || 'Asia/Ho_Chi_Minh';
     this.budgetTracker = {
-      date: new Date().toISOString().split('T')[0],
+      date: this._todayInTz(),
       spent: 0,
       calls: {}  // { model: { count, tokens, cost } }
     };
@@ -1194,7 +1196,7 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   _loadBudget() {
     try {
       const data = JSON.parse(require('fs').readFileSync(this._getBudgetPath(), 'utf8'));
-      if (data.date === new Date().toISOString().split('T')[0]) {
+      if (data.date === this._todayInTz()) {
         this.budgetTracker = data;
       }
     } catch { /* first run hoac file corrupt — dung defaults */ }
@@ -1239,10 +1241,25 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
    * Reset budget tracker neu sang ngay moi
    */
   _resetBudgetIfNewDay() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = this._todayInTz();
     if (this.budgetTracker.date !== today) {
       console.log(`💰 Budget reset: new day ${today} (yesterday spent: $${this.budgetTracker.spent.toFixed(4)})`);
       this.budgetTracker = { date: today, spent: 0, calls: {} };
+    }
+  }
+
+  /**
+   * Lay ngay hien tai theo timezone cau hinh (default Asia/Ho_Chi_Minh).
+   * Tranh container UTC reset budget sai gio cho user dia phuong.
+   * Format YYYY-MM-DD de match cu.
+   */
+  _todayInTz() {
+    try {
+      // 'sv' locale tra ve YYYY-MM-DD format chinh xac
+      return new Date().toLocaleDateString('sv', { timeZone: this._budgetTz });
+    } catch {
+      // Fallback neu TZ invalid
+      return new Date().toISOString().split('T')[0];
     }
   }
 
