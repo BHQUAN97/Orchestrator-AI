@@ -285,6 +285,43 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/templates') {
       return json(res, { templates: loadTemplates() });
     }
+
+    // GET /api/stream/:traceId — Server-Sent Events: live pipeline progress
+    // Mobile dung de tracking real-time thay vi cho 1-2 phut.
+    // Listener cleanup khi client disconnect HOAC nhan event 'finish'.
+    if (url.pathname.startsWith('/api/stream/')) {
+      const traceId = url.pathname.split('/api/stream/')[1];
+      if (!traceId) return error(res, 400, 'Missing traceId');
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'  // Tat nginx buffering cho SSE
+      });
+      res.write(`data: ${JSON.stringify({ type: 'connected', traceId })}\n\n`);
+
+      const handler = (event) => {
+        if (event.traceId !== traceId) return;
+        try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* client gone */ }
+        if (event.type === 'finish') {
+          orchestrator.tracer.off('trace:event', handler);
+          try { res.end(); } catch {}
+        }
+      };
+      orchestrator.tracer.on('trace:event', handler);
+
+      // Heartbeat moi 15s — giu ket noi alive qua proxy/CF
+      const ping = setInterval(() => {
+        try { res.write(`: heartbeat ${Date.now()}\n\n`); } catch { clearInterval(ping); }
+      }, 15000);
+
+      req.on('close', () => {
+        orchestrator.tracer.off('trace:event', handler);
+        clearInterval(ping);
+      });
+      return; // KHONG kept request open — SSE handles itself
+    }
   }
 
   // === DELETE endpoints ===

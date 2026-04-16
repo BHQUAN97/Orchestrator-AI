@@ -26,6 +26,7 @@
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
+    padding-bottom: 40px;
   }
 
   /* Header */
@@ -36,144 +37,178 @@
     padding: 16px 20px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
+    position: sticky; top: 0; z-index: 10;
   }
   .header h1 { font-size: 20px; font-weight: 700; }
   .header h1 span { color: var(--primary); }
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
+  .header-right { display: flex; align-items: center; gap: 12px; }
   .user-badge {
-    font-size: 13px;
-    color: var(--text-muted);
-    padding: 4px 10px;
-    background: var(--bg);
-    border-radius: 6px;
+    font-size: 13px; color: var(--text-muted);
+    padding: 4px 10px; background: var(--bg); border-radius: 6px;
   }
   .btn-logout {
-    padding: 6px 14px;
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.2s;
+    padding: 6px 14px; background: transparent; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; cursor: pointer;
   }
-  .btn-logout:hover {
-    color: var(--danger);
-    border-color: var(--danger);
-  }
+  .btn-logout:hover { color: var(--danger); border-color: var(--danger); }
 
   /* Status bar */
   .status-bar {
-    display: flex;
-    gap: 6px;
-    padding: 12px 20px;
+    display: flex; gap: 6px; padding: 12px 20px;
     border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    flex-wrap: wrap;
+    overflow-x: auto; flex-wrap: wrap;
   }
   .status-pill {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: var(--surface);
-    border-radius: 20px;
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; background: var(--surface); border-radius: 20px;
+    font-size: 12px; color: var(--text-muted); white-space: nowrap;
   }
   .dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--text-dim);
+    width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim);
   }
   .dot.ok { background: var(--success); }
   .dot.warn { background: var(--warning); }
   .dot.err { background: var(--danger); }
 
-  /* Grid */
+  .section-title {
+    font-size: 13px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 16px 20px 8px;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  /* Quick Run panel */
+  .quick-run {
+    margin: 12px 20px; padding: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .qr-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .qr-row select, .qr-row input[type=text] {
+    flex: 1; min-width: 120px;
+    padding: 10px 12px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    font-size: 14px;
+  }
+  .qr-prompt {
+    width: 100%; min-height: 90px;
+    padding: 12px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    font-size: 15px; font-family: inherit; resize: vertical;
+    margin-bottom: 10px;
+  }
+  .qr-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    padding: 10px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-hover); color: var(--text);
+    font-size: 14px; font-weight: 500; cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover:not(:disabled) { background: var(--primary); border-color: var(--primary); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.primary { background: var(--primary); border-color: var(--primary); }
+  .btn.primary:hover:not(:disabled) { background: var(--primary-hover); }
+  .btn.danger { color: var(--danger); border-color: var(--danger); }
+  .btn.danger:hover:not(:disabled) { background: var(--danger); color: white; }
+  .btn.warn { color: var(--warning); border-color: var(--warning); }
+  .btn.warn:hover:not(:disabled) { background: var(--warning); color: var(--bg); }
+
+  /* Live output */
+  .output {
+    margin: 12px 20px; padding: 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 280px; overflow-y: auto;
+    display: none;
+  }
+  .output.show { display: block; }
+  .output .line { padding: 2px 0; }
+  .output .info { color: var(--text-muted); }
+  .output .ok { color: var(--success); }
+  .output .fail { color: var(--danger); }
+  .output .warn { color: var(--warning); }
+
+  /* Panels */
+  .panels { display: grid; grid-template-columns: 1fr; gap: 12px; padding: 0 20px; }
+  @media (min-width: 768px) {
+    .panels { grid-template-columns: 1fr 1fr; }
+  }
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px;
+  }
+  .panel-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .panel-header h3 { font-size: 14px; font-weight: 600; }
+  .panel-list { font-size: 13px; }
+  .list-item {
+    padding: 8px; background: var(--bg); border-radius: 6px;
+    margin-bottom: 6px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .list-item:hover { background: var(--surface-hover); }
+  .list-item .meta {
+    font-size: 11px; color: var(--text-dim);
+    display: flex; gap: 8px; margin-top: 4px;
+  }
+  .empty { color: var(--text-dim); font-style: italic; padding: 8px; font-size: 12px; }
+
+  /* Services grid */
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 16px;
-    padding: 20px;
-    max-width: 1200px;
-    margin: 0 auto;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px; padding: 0 20px;
   }
   .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-decoration: none;
-    color: inherit;
-    display: block;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+    cursor: pointer; transition: all 0.2s;
+    text-decoration: none; color: inherit; display: block;
   }
   .card:hover {
-    background: var(--surface-hover);
-    border-color: var(--primary);
+    background: var(--surface-hover); border-color: var(--primary);
     transform: translateY(-2px);
   }
   .card-icon {
-    width: 42px; height: 42px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    margin-bottom: 14px;
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; margin-bottom: 10px;
   }
-  .card h3 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-  .card p {
-    font-size: 13px;
-    color: var(--text-muted);
-    line-height: 1.5;
-  }
+  .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .card p { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
   .card .port {
-    display: inline-block;
-    margin-top: 10px;
-    font-size: 11px;
-    color: var(--text-dim);
-    padding: 2px 8px;
-    background: var(--bg);
-    border-radius: 4px;
+    display: inline-block; margin-top: 8px;
+    font-size: 11px; color: var(--text-dim);
+    padding: 2px 8px; background: var(--bg); border-radius: 4px;
     font-family: monospace;
   }
-
-  /* Card icon colors */
   .icon-hermes { background: rgba(46, 204, 113, 0.15); color: #2ecc71; }
   .icon-webui { background: rgba(52, 152, 219, 0.15); color: #3498db; }
   .icon-litellm { background: rgba(243, 156, 18, 0.15); color: #f39c12; }
   .icon-api { background: rgba(108, 92, 231, 0.15); color: #6c5ce7; }
   .icon-analytics { background: rgba(231, 76, 60, 0.15); color: #e74c3c; }
 
-  /* Quick actions */
-  .section-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 0 20px;
-    margin-top: 8px;
+  .badge {
+    display: inline-block; padding: 2px 6px;
+    background: var(--bg); border-radius: 4px;
+    font-size: 10px; color: var(--text-muted); font-family: monospace;
   }
 
   /* Mobile */
   @media (max-width: 480px) {
-    .grid { padding: 12px; gap: 12px; }
-    .card { padding: 16px; }
+    .grid, .quick-run, .output, .panels { padding: 0 12px; margin-left: 0; margin-right: 0; }
+    .quick-run, .output { margin: 10px 12px; }
     .header { padding: 12px 16px; }
     .status-bar { padding: 8px 16px; }
+    .btn { padding: 12px 14px; font-size: 15px; } /* Lon hon cho touch */
   }
 </style>
 </head>
@@ -192,66 +227,117 @@
   <div class="status-pill"><span class="dot" id="dot-hermes"></span>Hermes</div>
   <div class="status-pill"><span class="dot" id="dot-webui"></span>WebUI</div>
   <div class="status-pill"><span class="dot" id="dot-analytics"></span>Analytics</div>
+  <div class="status-pill" id="budgetPill">Budget: ...</div>
+</div>
+
+<!-- QUICK RUN -->
+<p class="section-title">Quick Run</p>
+<div class="quick-run">
+  <div class="qr-row">
+    <select id="project">
+      <option value="">— No project —</option>
+      <option value="FashionEcom">FashionEcom</option>
+      <option value="VietNet2026">VietNet2026</option>
+      <option value="LeQuyDon">LeQuyDon</option>
+      <option value="WebPhoto">WebPhoto</option>
+      <option value="RemoteTerminal">RemoteTerminal</option>
+    </select>
+    <select id="task">
+      <option value="build">build</option>
+      <option value="fix" selected>fix</option>
+      <option value="review">review</option>
+      <option value="debug">debug</option>
+      <option value="docs">docs</option>
+    </select>
+    <input type="text" id="files" placeholder="files (a.ts, b.tsx)..." />
+    <select id="tpl"><option value="">— Template —</option></select>
+  </div>
+  <textarea id="prompt" class="qr-prompt" placeholder="Mo ta task... (vi du: sua bug nut login khong responsive tren mobile)"></textarea>
+  <div class="qr-buttons">
+    <button class="btn" id="btnVoice" title="Voice input (Chrome/Edge)">🎙️ Voice</button>
+    <button class="btn" id="btnEstimate">💰 Estimate</button>
+    <button class="btn warn" id="btnDry">🔍 Dry-run</button>
+    <button class="btn primary" id="btnRun">▶️ Run</button>
+    <button class="btn danger" id="btnCancel" style="display:none">⛔ Cancel</button>
+    <button class="btn" id="btnTplSave">💾 Save template</button>
+    <button class="btn" id="btnRollback">↩️ Rollback</button>
+  </div>
+</div>
+
+<!-- LIVE OUTPUT (SSE stream) -->
+<div class="output" id="output"></div>
+
+<!-- PANELS: Active runs + History + Templates + Rollback list -->
+<p class="section-title">Dashboard</p>
+<div class="panels">
+  <div class="panel">
+    <div class="panel-header"><h3>🏃 Active runs</h3><button class="btn" id="btnRefreshActive" style="padding:4px 10px;font-size:12px">↻</button></div>
+    <div class="panel-list" id="activeRuns"><div class="empty">Khong co task dang chay</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h3>📜 Recent runs</h3><button class="btn" id="btnRefreshHistory" style="padding:4px 10px;font-size:12px">↻</button></div>
+    <div class="panel-list" id="history"><div class="empty">Chua co run nao</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h3>📝 Templates</h3></div>
+    <div class="panel-list" id="templates"><div class="empty">Chua co template</div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h3>💾 Snapshots (rollback)</h3><button class="btn" id="btnRefreshSnap" style="padding:4px 10px;font-size:12px">↻</button></div>
+    <div class="panel-list" id="snapshots"><div class="empty">Chua co snapshot</div></div>
+  </div>
 </div>
 
 <p class="section-title">Services</p>
 <div class="grid">
   <a href="/hermes/" class="card" target="_blank">
-    <div class="card-icon icon-hermes">&#x1f9e0;</div>
+    <div class="card-icon icon-hermes">🧠</div>
     <h3>Hermes Brain</h3>
-    <p>Memory, vector DB, auto-learn, self-improve agent</p>
+    <p>Memory, vector DB, auto-learn</p>
     <span class="port">:5000</span>
   </a>
-
   <a href="/webui/" class="card" target="_blank">
-    <div class="card-icon icon-webui">&#x1f4ac;</div>
+    <div class="card-icon icon-webui">💬</div>
     <h3>Open WebUI</h3>
-    <p>Chat interface — mobile friendly, multi-model</p>
+    <p>Chat interface</p>
     <span class="port">:5001</span>
   </a>
-
   <a href="/litellm/ui" class="card" target="_blank">
-    <div class="card-icon icon-litellm">&#x26a1;</div>
+    <div class="card-icon icon-litellm">⚡</div>
     <h3>LiteLLM Gateway</h3>
-    <p>API proxy — model routing, rate limit, spend tracking</p>
+    <p>Proxy + rate limit</p>
     <span class="port">:5002</span>
   </a>
-
   <a href="/api/models" class="card" target="_blank">
-    <div class="card-icon icon-api">&#x1f916;</div>
+    <div class="card-icon icon-api">🤖</div>
     <h3>Orchestrator API</h3>
-    <p>Scan, plan, route, execute — coding agent pipeline</p>
+    <p>Scan, plan, execute</p>
     <span class="port">:5003</span>
   </a>
-
   <a href="/analytics/" class="card" target="_blank">
-    <div class="card-icon icon-analytics">&#x1f4ca;</div>
+    <div class="card-icon icon-analytics">📊</div>
     <h3>Cost Analytics</h3>
-    <p>Token usage, cost per model, daily trends, budget</p>
+    <p>Token usage, cost</p>
     <span class="port">:5004</span>
   </a>
 </div>
 
 <script>
-// Load user info
-fetch('/auth/me')
-  .then(r => r.json())
-  .then(d => {
-    if (d.user) document.getElementById('userBadge').textContent = d.user;
-    else window.location.href = '/login';
-  })
-  .catch(() => window.location.href = '/login');
+// === User + logout ===
+fetch('/auth/me').then(r => r.json()).then(d => {
+  if (d.user) document.getElementById('userBadge').textContent = d.user;
+  else location.href = '/login';
+}).catch(() => location.href = '/login');
 
-// Logout
-document.getElementById('logoutBtn').addEventListener('click', async () => {
+document.getElementById('logoutBtn').onclick = async () => {
   await fetch('/auth/logout', { method: 'POST' });
-  window.location.href = '/login';
-});
+  location.href = '/login';
+};
 
-// Health checks
+// === Health + budget ===
 async function checkHealth() {
   const checks = [
-    { id: 'litellm', url: '/litellm/health' },
+    { id: 'litellm', url: '/litellm/health/liveliness' },
     { id: 'orchestrator', url: '/health' },
     { id: 'hermes', url: '/hermes/' },
     { id: 'webui', url: '/webui/' },
@@ -262,13 +348,288 @@ async function checkHealth() {
     try {
       const r = await fetch(c.url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
       dot.className = r.ok ? 'dot ok' : 'dot warn';
-    } catch {
-      dot.className = 'dot err';
-    }
+    } catch { dot.className = 'dot err'; }
   }
+  try {
+    const b = await fetch('/health').then(r => r.json());
+    document.getElementById('budgetPill').textContent =
+      `Budget: ${b.budget?.spent || '$0'} / ${b.budget?.budget || '$2'} (${b.budget?.percent || '0%'})`;
+  } catch {}
 }
 checkHealth();
 setInterval(checkHealth, 30000);
+
+// === Output helpers ===
+const out = document.getElementById('output');
+function log(msg, cls = 'info') {
+  out.classList.add('show');
+  const d = document.createElement('div');
+  d.className = 'line ' + cls;
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  out.appendChild(d);
+  out.scrollTop = out.scrollHeight;
+}
+function clearOutput() { out.innerHTML = ''; out.classList.remove('show'); }
+
+// === Build request body from form ===
+function getBody() {
+  const prompt = document.getElementById('prompt').value.trim();
+  const project = document.getElementById('project').value;
+  const task = document.getElementById('task').value;
+  const filesStr = document.getElementById('files').value.trim();
+  const files = filesStr ? filesStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+  return { prompt, project, task, files };
+}
+
+// === Voice input (browser SpeechRecognition) ===
+const btnVoice = document.getElementById('btnVoice');
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) { btnVoice.disabled = true; btnVoice.title = 'Browser khong support (dung Chrome/Edge)'; }
+let recognizing = false;
+btnVoice.onclick = () => {
+  if (!SR) return;
+  if (recognizing) return;
+  const rec = new SR();
+  rec.lang = 'vi-VN'; rec.continuous = false; rec.interimResults = true;
+  const textarea = document.getElementById('prompt');
+  const base = textarea.value;
+  btnVoice.textContent = '🔴 Listening...';
+  recognizing = true;
+  rec.onresult = (e) => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join(' ');
+    textarea.value = (base ? base + ' ' : '') + transcript;
+  };
+  rec.onerror = (e) => { log('Voice error: ' + e.error, 'fail'); };
+  rec.onend = () => { recognizing = false; btnVoice.textContent = '🎙️ Voice'; };
+  rec.start();
+};
+
+// === Estimate ===
+document.getElementById('btnEstimate').onclick = async () => {
+  const body = getBody();
+  if (!body.prompt) return log('Nhap prompt truoc!', 'warn');
+  clearOutput(); log('Estimate cost...', 'info');
+  try {
+    const r = await fetch('/api/estimate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (d.error) return log('Error: ' + d.error, 'fail');
+    log(`💰 Estimate: ${d.estimate.total_cost} (${d.estimate.total_tokens} tokens, ${d.subtasks} subtasks)`, 'ok');
+    log(`Plan: ${d.plan_summary}`, 'info');
+    log(`Budget remaining: ${d.budget_remaining}`, 'info');
+  } catch (e) { log('Fetch error: ' + e.message, 'fail'); }
+};
+
+// === Dry-run ===
+document.getElementById('btnDry').onclick = async () => runTask(true);
+document.getElementById('btnRun').onclick = async () => runTask(false);
+
+let currentTraceId = null;
+let currentEventSource = null;
+
+async function runTask(dry) {
+  const body = getBody();
+  if (!body.prompt) return log('Nhap prompt truoc!', 'warn');
+  body.dry = dry;
+  clearOutput();
+  log(`${dry ? '🔍 Dry-run' : '▶️ Run'}: ${body.prompt.slice(0, 60)}...`, 'info');
+  document.getElementById('btnRun').disabled = true;
+  document.getElementById('btnDry').disabled = true;
+  document.getElementById('btnCancel').style.display = dry ? 'none' : 'inline-flex';
+
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await res.json();
+
+    if (d.dry_run) {
+      log('🔍 DRY-RUN DONE — plan generated, KHONG execute', 'ok');
+      log(`Estimate: ${d.estimate.total_cost} (${d.estimate.total_tokens} tokens)`, 'info');
+      log(`Plan: ${d.plan?.analysis || '(no analysis)'}`, 'info');
+      log(`Subtasks: ${d.plan?.subtasks?.length || 0}`, 'info');
+      if (d.trace?.timeline) log(`Timeline: ${d.trace.timeline}`, 'info');
+    } else if (d.success) {
+      log(`✅ DONE (${d.elapsed_ms}ms)`, 'ok');
+      log(`Summary: ${d.summary || '(no summary)'}`, 'info');
+      log(`Timeline: ${d.trace?.elapsed_human || d.elapsed_ms + 'ms'}`, 'info');
+      log(`Models: ${(d.models_used || []).join(', ')}`, 'info');
+    } else {
+      log(`❌ FAILED: ${d.error || d.summary || 'Unknown'}`, 'fail');
+      if (d.suggestion) log(`→ ${d.suggestion}`, 'warn');
+    }
+    refreshHistory(); refreshBudget(); refreshSnapshots();
+  } catch (e) {
+    log('Fetch error: ' + e.message, 'fail');
+  } finally {
+    document.getElementById('btnRun').disabled = false;
+    document.getElementById('btnDry').disabled = false;
+    document.getElementById('btnCancel').style.display = 'none';
+    refreshActive();
+  }
+}
+
+async function refreshBudget() {
+  try {
+    const b = await fetch('/health').then(r => r.json());
+    document.getElementById('budgetPill').textContent =
+      `Budget: ${b.budget?.spent} / ${b.budget?.budget} (${b.budget?.percent})`;
+  } catch {}
+}
+
+// === Cancel ===
+document.getElementById('btnCancel').onclick = async () => {
+  const runs = await fetch('/api/runs').then(r => r.json()).catch(() => ({ active: [] }));
+  if (!runs.active?.length) return log('Khong co task dang chay', 'warn');
+  for (const r of runs.active) {
+    await fetch('/api/run/' + r.traceId, { method: 'DELETE' });
+    log(`Cancelled: ${r.traceId}`, 'warn');
+  }
+  refreshActive();
+};
+
+// === Active runs ===
+async function refreshActive() {
+  try {
+    const d = await fetch('/api/runs').then(r => r.json());
+    const el = document.getElementById('activeRuns');
+    if (!d.active?.length) { el.innerHTML = '<div class="empty">Khong co task dang chay</div>'; return; }
+    el.innerHTML = d.active.map(r => `
+      <div class="list-item">
+        <div>${escapeHtml(r.prompt)}</div>
+        <div class="meta">
+          <span class="badge">${r.project || 'global'}</span>
+          <span>${(r.elapsed_ms/1000).toFixed(1)}s</span>
+          <button class="btn danger" style="padding:2px 8px;font-size:11px" onclick="cancelRun('${r.traceId}')">Cancel</button>
+        </div>
+      </div>`).join('');
+  } catch {}
+}
+async function cancelRun(id) {
+  await fetch('/api/run/' + id, { method: 'DELETE' });
+  log(`Cancelled: ${id}`, 'warn');
+  refreshActive();
+}
+setInterval(refreshActive, 3000);
+
+// === History ===
+async function refreshHistory() {
+  try {
+    const d = await fetch('/api/history?limit=10').then(r => r.json());
+    const el = document.getElementById('history');
+    if (!d.runs?.length) { el.innerHTML = '<div class="empty">Chua co run nao</div>'; return; }
+    el.innerHTML = d.runs.map(r => `
+      <div class="list-item" onclick="document.getElementById('prompt').value='${escapeHtml(r.summary).replace(/'/g,'\\\'')}'">
+        <div>${escapeHtml(r.summary || '(no summary)')}</div>
+        <div class="meta">
+          <span class="badge">${r.project || '-'}</span>
+          <span>${(r.models_used || []).join(', ')}</span>
+          <span>${Math.round((r.elapsed_ms || 0)/1000)}s</span>
+          ${r.escalations > 0 ? `<span style="color:var(--warning)">🆘 ${r.escalations}</span>` : ''}
+        </div>
+      </div>`).join('');
+  } catch {}
+}
+document.getElementById('btnRefreshHistory').onclick = refreshHistory;
+document.getElementById('btnRefreshActive').onclick = refreshActive;
+
+// === Templates ===
+async function refreshTemplates() {
+  try {
+    const d = await fetch('/api/templates').then(r => r.json());
+    const el = document.getElementById('templates');
+    const sel = document.getElementById('tpl');
+    const entries = Object.entries(d.templates || {});
+    sel.innerHTML = '<option value="">— Template —</option>' + entries.map(([n]) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    if (!entries.length) { el.innerHTML = '<div class="empty">Chua co template. Save voi nut "💾 Save template"</div>'; return; }
+    el.innerHTML = entries.map(([name, t]) => `
+      <div class="list-item" onclick="applyTemplate('${escapeHtml(name)}')">
+        <div><b>${escapeHtml(name)}</b></div>
+        <div class="meta">
+          <span class="badge">${t.task || '-'}</span>
+          <span>${escapeHtml((t.prompt || '').slice(0, 50))}</span>
+          <button class="btn danger" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteTemplate('${escapeHtml(name)}')">✕</button>
+        </div>
+      </div>`).join('');
+  } catch {}
+}
+async function applyTemplate(name) {
+  const d = await fetch('/api/templates').then(r => r.json());
+  const t = d.templates?.[name]; if (!t) return;
+  document.getElementById('prompt').value = t.prompt || '';
+  document.getElementById('task').value = t.task || 'build';
+  document.getElementById('files').value = (t.files || []).join(', ');
+  if (t.project) document.getElementById('project').value = t.project;
+  log(`Loaded template: ${name}`, 'ok');
+}
+async function deleteTemplate(name) {
+  if (!confirm(`Delete template "${name}"?`)) return;
+  await fetch('/api/templates/' + encodeURIComponent(name), { method: 'DELETE' });
+  refreshTemplates();
+}
+document.getElementById('tpl').onchange = (e) => { if (e.target.value) applyTemplate(e.target.value); };
+document.getElementById('btnTplSave').onclick = async () => {
+  const body = getBody();
+  if (!body.prompt) return log('Nhap prompt truoc!', 'warn');
+  const name = prompt('Template name?', 'my-template');
+  if (!name) return;
+  await fetch('/api/templates', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ name, ...body })
+  });
+  log(`Saved template: ${name}`, 'ok');
+  refreshTemplates();
+};
+
+// === Snapshots (rollback) ===
+async function refreshSnapshots() {
+  try {
+    const project = document.getElementById('project').value;
+    const qs = project ? `?project=${encodeURIComponent(project)}` : '';
+    const d = await fetch('/api/rollback/list' + qs).then(r => r.json());
+    const el = document.getElementById('snapshots');
+    if (!d.snapshots?.length) { el.innerHTML = `<div class="empty">Khong co snapshot trong ${d.project}</div>`; return; }
+    el.innerHTML = d.snapshots.slice(0, 8).map(s => `
+      <div class="list-item" onclick="rollbackTo('${s.hash}')">
+        <div><code>${s.hash}</code> ${escapeHtml((s.message || '').slice(0, 50))}</div>
+        <div class="meta"><span>${s.date || ''}</span></div>
+      </div>`).join('');
+  } catch {}
+}
+async function rollbackTo(hash) {
+  if (!confirm(`Rollback to ${hash}? Se ghi de working directory!`)) return;
+  const project = document.getElementById('project').value;
+  const r = await fetch('/api/rollback', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ project, hash })
+  });
+  const d = await r.json();
+  if (d.rolled_back) log(`✅ Rolled back to ${hash}`, 'ok');
+  else log('Rollback failed: ' + (d.error || 'unknown'), 'fail');
+}
+document.getElementById('btnRollback').onclick = () => {
+  const project = document.getElementById('project').value;
+  if (!project) return log('Chon project truoc de rollback', 'warn');
+  fetch('/api/rollback/list?project=' + encodeURIComponent(project))
+    .then(r => r.json())
+    .then(d => {
+      if (!d.snapshots?.length) return log('Khong co snapshot', 'warn');
+      rollbackTo(d.snapshots[0].hash);
+    });
+};
+document.getElementById('btnRefreshSnap').onclick = refreshSnapshots;
+document.getElementById('project').onchange = refreshSnapshots;
+
+// === Helpers ===
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+// Initial load
+refreshHistory(); refreshTemplates(); refreshSnapshots(); refreshActive();
 </script>
 </body>
 </html>
