@@ -1,6 +1,7 @@
-# AI Orchestrator — Huong dan day du
+# AI Orchestrator v2.1 — Huong dan day du
 
-> Multi-model agent system: route task sang model phu hop, tiet kiem chi phi.
+> Hermes Brain + Orchestrator Hands: multi-model coding agent system.
+> Route task sang model phu hop, tiet kiem chi phi 70-95%.
 > Dung ket hop voi Claude Code — KHONG thay the.
 
 ---
@@ -157,10 +158,10 @@ docker compose up -d
 
 ```bash
 # Health check
-curl http://localhost:4001/health -H "Authorization: Bearer sk-master-change-me"
+curl http://localhost:5002/health -H "Authorization: Bearer sk-master-change-me"
 
 # Test model
-curl http://localhost:4001/v1/chat/completions \
+curl http://localhost:5002/v1/chat/completions \
   -H "Authorization: Bearer sk-master-change-me" \
   -H "Content-Type: application/json" \
   -d '{"model":"default","messages":[{"role":"user","content":"Hi"}],"max_tokens":10}'
@@ -168,9 +169,11 @@ curl http://localhost:4001/v1/chat/completions \
 
 ### Buoc 5: Mo dashboard
 
-- LiteLLM: http://localhost:4001/ui (admin/admin)
-- Hermes: http://localhost:3000
-- Dashboard: http://localhost:9080
+- Hermes (Brain): http://localhost:5000
+- WebUI (chat): http://localhost:5001
+- LiteLLM: http://localhost:5002/ui (admin/admin)
+- Orchestrator API: http://localhost:5003
+- Analytics: http://localhost:5004
 
 ---
 
@@ -189,9 +192,12 @@ ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
 DEEPSEEK_API_KEY=
 
-# Ports
-LITELLM_PORT=4001
-HERMES_PORT=3000
+# Ports (dai 5000-5009)
+HERMES_PORT=5000
+WEBUI_PORT=5001
+LITELLM_PORT=5002
+ORCHESTRATOR_PORT=5003
+ANALYTICS_PORT=5004
 ```
 
 ### 4.2 Model routing (`litellm_config.yaml`)
@@ -253,7 +259,7 @@ Xem `PORTS.md` — moi project co dai rieng:
 
 | Project | Dai |
 |---|---|
-| ai-orchestrator | 3000, 4001, 9080 |
+| ai-orchestrator | 5000-5004 |
 | VietNet2026 | 5100-5199 |
 | LeQuyDon | 5200-5299 |
 | FashionEcom | 5300-5399 |
@@ -267,7 +273,7 @@ Xem `PORTS.md` — moi project co dai rieng:
 
 ```bash
 # Model default (Kimi K2.5)
-curl http://localhost:4001/v1/chat/completions \
+curl http://localhost:5002/v1/chat/completions \
   -H "Authorization: Bearer sk-master-change-me" \
   -H "Content-Type: application/json" \
   -d '{
@@ -277,7 +283,7 @@ curl http://localhost:4001/v1/chat/completions \
   }'
 
 # Model fast (Gemini Flash) cho review
-curl http://localhost:4001/v1/chat/completions \
+curl http://localhost:5002/v1/chat/completions \
   -H "Authorization: Bearer sk-master-change-me" \
   -H "Content-Type: application/json" \
   -d '{
@@ -352,9 +358,24 @@ console.log(ctx.context);      // Noi dung 10 files
 console.log(ctx.reduction);    // "97%"
 ```
 
-### 5.5 Hermes Agent (chat qua web)
+### 5.5 OrcAI CLI (coding agent)
 
-Mo http://localhost:3000 → Chat truc tiep.
+```bash
+# Setup (1 lan)
+./scripts/setup-agent.sh    # Linux/Mac
+scripts\setup-agent.bat     # Windows
+
+# Su dung
+orcai -i                                  # Interactive mode
+orcai "sua bug login"                     # One-shot
+orcai -p /path/to/project "them feature"  # Chi dinh project
+orcai --model smart "refactor auth"       # Chon model
+```
+
+### 5.6 Hermes Agent (chat qua web)
+
+Mo http://localhost:5001 → Chat qua Open WebUI.
+Hoac http://localhost:5000 → Hermes dashboard.
 Hermes tu dong goi LiteLLM proxy → chon model.
 
 ---
@@ -501,9 +522,11 @@ User: "Them wishlist feature"
 
 | URL | Chuc nang |
 |---|---|
-| http://localhost:9080 | Orchestrator Dashboard (overview, cost, models, settings) |
-| http://localhost:4001/ui | LiteLLM Dashboard (chi tiet token/cost, admin/admin) |
-| http://localhost:3000 | Hermes Agent (chat, settings, memory) |
+| http://localhost:5000 | Hermes Brain (agent engine, memory, dashboard) |
+| http://localhost:5001 | Open WebUI (mobile-friendly chat) |
+| http://localhost:5002/ui | LiteLLM Dashboard (chi tiet token/cost, admin/admin) |
+| http://localhost:5003 | Orchestrator REST API (scan/plan/execute) |
+| http://localhost:5004 | Analytics + Dashboard (overview, cost, models, settings) |
 
 ### Dashboard tabs
 
@@ -677,7 +700,7 @@ docker logs litellm-proxy
 
 ```bash
 # Check model co healthy khong
-curl http://localhost:4001/health -H "Authorization: Bearer sk-master-change-me"
+curl http://localhost:5002/health -H "Authorization: Bearer sk-master-change-me"
 
 # Check key dung chua
 # Loi 401 → sai key
@@ -688,7 +711,7 @@ curl http://localhost:4001/health -H "Authorization: Bearer sk-master-change-me"
 ### Hermes khong connect LiteLLM
 
 ```bash
-# Trong container
+# Trong container (LiteLLM internal port la 4000)
 docker compose exec hermes curl http://litellm:4000/health
 # Neu fail → check docker network
 docker network ls
@@ -717,8 +740,8 @@ node graph/index-projects.js
 ### Dashboard khong hien data
 
 - LiteLLM can vai request truoc khi co data
-- Dashboard goi `localhost:4001/spend/logs` → check CORS
-- Neu loi: mo truc tiep http://localhost:4001/ui (LiteLLM built-in)
+- Dashboard goi `localhost:5002/spend/logs` → check CORS
+- Neu loi: mo truc tiep http://localhost:5002/ui (LiteLLM built-in)
 
 ---
 
@@ -729,35 +752,63 @@ ai-orchestrator/
 ├── .env                          ← API keys (KHONG commit)
 ├── .env.example                  ← Template
 ├── .gitignore
-├── docker-compose.yaml           ← 4 services
+├── package.json                  ← CLI + dependencies
+├── docker-compose.yaml           ← 6 services (port 5000-5004)
+├── docker-compose.agent.yaml     ← Coding agent sandbox
+├── Dockerfile.agent              ← Agent container image
 ├── litellm_config.yaml           ← Model routing
 ├── hermes_config.yaml            ← Agent config
-├── PORTS.md                      ← Port allocation
-├── README.md                     ← Quick start
-├── setup.sh                      ← Auto setup script
-├── test-gemini.sh                ← Test script
 ├── model-routing-map.md          ← Task → model mapping
+├── README.md                     ← Quick start
+├── bin/
+│   └── orcai.js                  ← CLI entry point (`orcai` command)
+├── lib/
+│   ├── agent-loop.js             ← Main agent loop
+│   ├── orchestrator-v3.js        ← Orchestrator v3 engine
+│   ├── config.js                 ← Configuration management
+│   ├── conversation-manager.js   ← Conversation history
+│   ├── repo-mapper.js            ← Repository structure mapping
+│   ├── token-manager.js          ← Token counting + budget
+│   └── auto-verify.js            ← Auto-verify tool results
+├── tools/
+│   ├── definitions.js            ← Tool definitions for LLM
+│   ├── executor.js               ← Tool execution engine
+│   ├── file-manager.js           ← Read/write/edit files
+│   └── terminal-runner.js        ← Run shell commands
+├── src/
+│   ├── api-server.js             ← Orchestrator REST API
+│   └── auth.ts                   ← Authentication
 ├── router/
 │   ├── smart-router.js           ← Tu chon model
 │   ├── orchestrator-agent.js     ← Chia viec cho nhieu model
+│   ├── context-manager.js        ← Structured context injection
+│   ├── decision-lock.js          ← Decision registry
+│   ├── tech-lead-agent.js        ← Tech Lead agent
 │   └── test-router.js            ← Test routing
 ├── cache/
 │   └── context-cache.js          ← Cache prompt prefix
 ├── graph/
 │   ├── trust-graph.js            ← Dependency graph
-│   ├── index-projects.js         ← Index 5 projects
+│   ├── index-projects.js         ← Index projects
 │   ├── query.js                  ← Query CLI
 │   ├── watcher.js                ← Auto re-index (local)
 │   └── watcher-docker.js         ← Auto re-index (docker)
+├── analytics/
+│   ├── api-server.js             ← Analytics REST API
+│   ├── tracker.js                ← Cost tracking
+│   └── dashboard.html            ← Analytics UI
 ├── dashboard/
 │   ├── index.html                ← Web UI
 │   └── serve.js                  ← Server
-├── skills/
-│   ├── developer.md
-│   ├── reviewer.md
-│   └── docs-writer.md
+├── scripts/
+│   ├── setup-agent.sh            ← Setup (Linux/Mac)
+│   └── setup-agent.bat           ← Setup (Windows)
+├── skills/                       ← Hermes agent skills
+├── prompts/                      ← Agent prompt templates
 ├── data/
 │   └── graphs/*.json             ← Indexed project data
 └── docs/
-    └── GUIDE.md                  ← File nay
+    ├── GUIDE.md                  ← File nay
+    ├── MODEL-COMPARISON.md       ← So sanh models
+    └── UPGRADE-PLAN.md           ← Ke hoach nang cap
 ```

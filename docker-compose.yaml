@@ -68,15 +68,22 @@ services:
     command: ["dashboard", "--host", "0.0.0.0", "--port", "3000", "--insecure"]
 
   # === Hermes WebUI — Mobile-friendly dashboard ===
+  # NOTE: nesquena/hermes-webui can hermes-agent installed cung version
+  # Dung Open WebUI thay the neu hermes-webui khong tuong thich
   hermes-webui:
-    image: ghcr.io/nesquena/hermes-webui:latest
+    image: ghcr.io/open-webui/open-webui:main
     container_name: orcai-webui
     ports:
-      - "${WEBUI_PORT:-5001}:3000"
+      - "${WEBUI_PORT:-5001}:8080"
     environment:
-      - HERMES_URL=http://hermes:3000
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - WEBUI_AUTH=false
+      - ENABLE_SIGNUP=false
+    volumes:
+      - webui_data:/app/backend/data
     depends_on:
-      - hermes
+      - litellm
     restart: unless-stopped
 
   # === Orchestrator API — HANDS: scan, plan, route, execute ===
@@ -147,4 +154,6 @@ volumes:
   litellm_data:
     driver: local
   hermes_data:
+    driver: local
+  webui_data:
     driver: local

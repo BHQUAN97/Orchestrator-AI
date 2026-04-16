@@ -1,0 +1,25 @@
+# ============================================
+# AI Orchestrator — Coding Agent Service
+# Dung doc lap hoac ket hop voi main compose:
+#   docker compose -f docker-compose.yaml -f docker-compose.agent.yaml up coding-agent
+#   docker compose -f docker-compose.agent.yaml run --rm coding-agent
+# ============================================
+
+services:
+  coding-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: orcai-coding-agent
+    volumes:
+      # Mount project dir vao /workspace — mac dinh la thu muc hien tai
+      - ${PROJECT_DIR:-.}:/workspace
+    environment:
+      - LITELLM_URL=http://litellm:4000
+      - LITELLM_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+    depends_on:
+      - litellm
+    # Cho phep interactive mode (stdin/tty)
+    stdin_open: true
+    tty: true
+    restart: "no"

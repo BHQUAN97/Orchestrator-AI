@@ -1,13 +1,17 @@
-# AI Orchestrator
+# AI Orchestrator v2.1
 
-Multi-model AI agent orchestration system with **Tech Lead review**, **decision locking**, **escalation handling**, and **structured context normalization**.
+Multi-model AI coding agent system: **Hermes Brain** (memory, learning, self-improve) + **Orchestrator Hands** (scan, plan, route, execute).
 
-Automatically routes tasks to the optimal model: Kimi K2.5 (frontend), DeepSeek (backend), Gemini Flash (review), Claude Sonnet (architecture) — reducing token cost by 70-95% compared to using a single premium model for everything.
+Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks to optimal models: Kimi K2.5 (frontend), DeepSeek (backend), Gemini Flash (review), Claude Sonnet (architecture). Reduces token cost by 70-95% compared to a single premium model.
 
 ## Architecture
 
 ```
-User Request
+User Request (CLI / API / WebUI)
+     |
+  Hermes (Brain) — memory, learning, self-improve
+     |
+  Orchestrator (Hands) — scan → plan → route → execute
      |
   Dispatcher (Gemini Flash — cheapest)
      |
@@ -38,8 +42,18 @@ FE Dev    BE Dev    Reviewer   Debugger
 
 ## Key Features
 
+### OrcAI CLI
+Coding agent with interactive and one-shot modes:
+
+```bash
+orcai "sua bug login"                    # One-shot mode
+orcai -i                                 # Interactive mode
+orcai -p /path/to/project "them feature" # Specify project
+orcai --model smart "refactor auth"      # Choose model
+```
+
 ### Multi-Model Routing
-Each agent role maps to the most cost-effective model for its specialty:
+Each agent role maps to the most cost-effective model:
 
 | Agent Role | Model | Cost/1M tokens | Specialty |
 |---|---|---|---|
@@ -50,6 +64,10 @@ Each agent role maps to the most cost-effective model for its specialty:
 | `tech-lead` | Claude Sonnet | $3.00 | Architecture, plan review, escalation |
 | `debugger` | Claude Sonnet | $3.00 | Complex multi-file debugging |
 | `docs` | DeepSeek | $0.27 | Documentation, JSDoc, README |
+
+### Hermes Brain + Orchestrator Hands
+- **Hermes** (Brain): memory, vector DB, auto-learn, self-improve — decides WHAT to do
+- **Orchestrator** (Hands): scan, plan, route, execute — decides HOW to do it
 
 ### Tech Lead Agent
 Claude Sonnet acts as Tech Lead — reviews execution plans before dev agents run:
@@ -72,13 +90,8 @@ Dev agents automatically escalate to Tech Lead when:
 5. Architecture change needed
 6. Security implications unclear
 
-Tech Lead responds with one of:
-- **GUIDE**: Provide specific direction, agent retries (preferred, cheapest)
-- **REDIRECT**: Switch to a different model/agent better suited
-- **TAKE_OVER**: Tech Lead handles it directly (rare, expensive)
-
 ### Context Normalization
-All agents receive context as structured JSON — not free-form text:
+All agents receive context as structured JSON:
 - Every model parses the same data structure identically
 - Includes: project metadata, task info, locked decisions, spec/plan, previous results
 - Output normalization: standardizes results before passing to next agent
@@ -89,15 +102,39 @@ All agents receive context as structured JSON — not free-form text:
 ai-orchestrator/
 |-- .env.example              # API keys template (copy to .env)
 |-- .gitignore
-|-- docker-compose.yaml       # All services
+|-- package.json              # CLI + dependencies
+|-- docker-compose.yaml       # 6 services (port range 5000-5004)
+|-- docker-compose.agent.yaml # Coding agent sandbox (optional)
+|-- Dockerfile.agent          # Agent container image
 |-- litellm_config.yaml       # Model routing + fallback + budget
 |-- hermes_config.yaml        # Hermes agent config
-|-- model-routing-map.md      # Task-to-model mapping reference
 |
-|-- router/                   # Core orchestration modules
-|   |-- orchestrator-agent.js # Main flow: plan -> review -> execute -> escalation
+|-- bin/                      # CLI entry point
+|   +-- orcai.js              # `orcai` command
+|
+|-- lib/                      # Core agent engine
+|   |-- agent-loop.js         # Main agent loop (think → tool → verify)
+|   |-- orchestrator-v3.js    # Orchestrator v3 engine
+|   |-- config.js             # Configuration management
+|   |-- conversation-manager.js # Conversation history
+|   |-- repo-mapper.js        # Repository structure mapping
+|   |-- token-manager.js      # Token counting + budget
+|   +-- auto-verify.js        # Auto-verify tool results
+|
+|-- tools/                    # Agent tools (file, terminal, etc.)
+|   |-- definitions.js        # Tool definitions for LLM
+|   |-- executor.js           # Tool execution engine
+|   |-- file-manager.js       # Read/write/edit files
+|   +-- terminal-runner.js    # Run shell commands
+|
+|-- src/                      # Server-side
+|   |-- api-server.js         # Orchestrator REST API
+|   +-- auth.ts               # Authentication
+|
+|-- router/                   # Orchestration modules
+|   |-- orchestrator-agent.js # Plan -> review -> execute -> escalation
 |   |-- smart-router.js       # Score-based model selection
-|   |-- context-manager.js    # Structured context injection + normalization
+|   |-- context-manager.js    # Structured context injection
 |   |-- decision-lock.js      # Decision registry (lock/unlock/validate)
 |   |-- tech-lead-agent.js    # Tech Lead: review, approve, escalation
 |   +-- test-router.js        # Tests
@@ -107,7 +144,8 @@ ai-orchestrator/
 |   |-- fe-dev.md
 |   |-- be-dev.md
 |   |-- reviewer.md
-|   +-- debugger.md
+|   |-- debugger.md
+|   +-- scanner.md
 |
 |-- graph/                    # Trust Graph (context reduction)
 |   |-- trust-graph.js        # Build dependency graph
@@ -126,8 +164,21 @@ ai-orchestrator/
 |   |-- index.html
 |   +-- serve.js
 |
+|-- scripts/                  # Setup & utility scripts
+|   |-- setup-agent.sh        # Setup (Linux/Mac)
+|   |-- setup-agent.bat       # Setup (Windows)
+|   |-- start.bat             # Start services (Windows)
+|   |-- stop.bat              # Stop services (Windows)
+|   +-- cli.sh                # CLI wrapper
+|
 |-- skills/                   # Hermes agent skills
 |-- docs/                     # Documentation
+|   |-- GUIDE.md              # Full guide
+|   |-- MODEL-COMPARISON.md   # Model comparison
+|   |-- UPGRADE-PLAN.md       # Upgrade plan
+|   |-- PORTS.md              # Port allocation
+|   +-- model-routing-map.md  # Task-to-model mapping
+|
 |-- .roomodes                 # Roo Code custom modes (7 modes)
 +-- .roo/rules/               # Roo Code rules per mode
 ```
@@ -139,102 +190,94 @@ ai-orchestrator/
 - Node.js 18+
 - Git
 
-### Step 1: Clone and configure
+### Option A: Docker (recommended)
 
 ```bash
 git clone https://github.com/BHQUAN97/Orchestrator-AI.git
 cd Orchestrator-AI
 
-# Copy env template
+# Configure API keys
 cp .env.example .env
+# Edit .env — add at least one provider key
+
+# Start all services
+docker compose up -d
+
+# Verify
+docker compose ps
 ```
 
-### Step 2: Get API keys
+### Option B: Local CLI
+
+```bash
+git clone https://github.com/BHQUAN97/Orchestrator-AI.git
+cd Orchestrator-AI
+
+# Run setup script
+./scripts/setup-agent.sh    # Linux/Mac
+scripts\setup-agent.bat     # Windows
+
+# Use CLI
+orcai --help
+orcai -i            # Interactive mode
+```
+
+### API Keys
 
 You need at least ONE provider key. **OpenRouter** is recommended (1 key = 200+ models):
 
 | Provider | Sign up | Free tier |
 |---|---|---|
-| **OpenRouter** (recommended) | https://openrouter.ai/keys | $5 free credit |
-| Google Gemini | https://aistudio.google.com/apikey | Yes |
-| DeepSeek | https://platform.deepseek.com/api_keys | Yes |
-| Moonshot (Kimi) | https://platform.moonshot.cn/console/api-keys | Yes |
-| Anthropic (Sonnet) | https://console.anthropic.com/settings/keys | No |
+| **OpenRouter** (recommended) | openrouter.ai/keys | $5 free credit |
+| Google Gemini | aistudio.google.com/apikey | Yes |
+| DeepSeek | platform.deepseek.com/api_keys | Yes |
+| Moonshot (Kimi) | platform.moonshot.cn/console/api-keys | Yes |
+| Anthropic (Sonnet) | console.anthropic.com/settings/keys | No |
 
-### Step 3: Edit `.env`
+### Services (Docker)
 
-```bash
-# Required: at least one
-OPENROUTER_API_KEY=your-key-here
-GEMINI_API_KEY=your-key-here
-
-# Optional: direct provider keys (bypass OpenRouter for lower latency)
-DEEPSEEK_API_KEY=your-key-here
-KIMI_API_KEY=your-key-here
-ANTHROPIC_API_KEY=your-key-here
-
-# LiteLLM proxy key (change this for security)
-LITELLM_MASTER_KEY=your-custom-master-key
-```
-
-### Step 4: Start services
-
-```bash
-docker compose up -d
-
-# Verify
-docker compose ps
-docker compose logs -f
-```
-
-### Step 5: Verify
-
-| Service | URL | Check |
-|---|---|---|
-| LiteLLM Proxy | http://localhost:4001/health | `{"status": "healthy"}` |
-| LiteLLM UI | http://localhost:4001/ui | Dashboard loads |
-| Dashboard | http://localhost:8080 | Overview page |
+| Service | Port | URL | Description |
+|---|---|---|---|
+| Hermes (Brain) | 5000 | http://localhost:5000 | Agent engine + memory |
+| WebUI | 5001 | http://localhost:5001 | Open WebUI chat interface |
+| LiteLLM Gateway | 5002 | http://localhost:5002 | API gateway + model routing |
+| Orchestrator API | 5003 | http://localhost:5003 | REST API (scan/plan/execute) |
+| Analytics Dashboard | 5004 | http://localhost:5004 | Cost tracking + monitoring |
 
 ## Usage
 
-### Via Orchestrator (Node.js)
-
-```javascript
-const { OrchestratorAgent } = require('./router/orchestrator-agent');
-
-const orchestrator = new OrchestratorAgent({
-  projectDir: '/path/to/your/project',
-  litellmUrl: 'http://localhost:4001',
-  litellmKey: process.env.LITELLM_MASTER_KEY
-});
-
-// Full flow: plan -> tech lead review -> execute -> synthesize
-const result = await orchestrator.run('Build login page with JWT auth', {
-  files: ['src/auth/login.tsx', 'src/api/auth.service.ts'],
-  task: 'build'
-});
-
-console.log(result.summary);
-console.log(`Models used: ${result.models_used.join(', ')}`);
-console.log(`Escalations: ${result.escalations.length}`);
-```
-
-### Via CLI
+### Via OrcAI CLI
 
 ```bash
-# Simple task (auto-routes to best model)
-node -e "
-  const { OrchestratorAgent } = require('./router/orchestrator-agent');
-  const o = new OrchestratorAgent({ litellmKey: process.env.LITELLM_MASTER_KEY });
-  o.run('review auth module for security issues', { task: 'review' })
-   .then(r => console.log(r.summary));
-"
+# Interactive mode
+orcai -i
+
+# One-shot
+orcai "build login page with JWT auth"
+
+# Specify project and model
+orcai -p /path/to/project --model smart "refactor auth module"
+```
+
+### Via Orchestrator API
+
+```bash
+# Full flow: scan → plan → review → execute
+curl -X POST http://localhost:5003/api/run \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Build login page with JWT auth", "project": "FashionEcom"}'
+
+# Check budget
+curl http://localhost:5003/api/budget
+
+# Health check
+curl http://localhost:5003/health
 ```
 
 ### Via LiteLLM API directly
 
 ```bash
-curl http://localhost:4001/v1/chat/completions \
+curl http://localhost:5002/v1/chat/completions \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -244,6 +287,16 @@ curl http://localhost:4001/v1/chat/completions \
 ```
 
 Model names: `default` (Kimi), `smart` (Sonnet), `fast` (Gemini), `cheap` (DeepSeek)
+
+### Coding Agent Sandbox (Docker)
+
+```bash
+# Build and run coding agent in container
+docker compose -f docker-compose.yaml -f docker-compose.agent.yaml up coding-agent
+
+# Or run one-off
+docker compose -f docker-compose.agent.yaml run --rm coding-agent
+```
 
 ### With Roo Code (VS Code)
 
@@ -306,18 +359,18 @@ general_settings:
 
 ## Troubleshooting
 
-**LiteLLM won't start:**
+**Services won't start:**
 ```bash
-docker compose logs litellm
-# Common: YAML syntax error, missing env var
+docker compose logs <service-name>
+# Common: YAML syntax error, missing env var, port conflict
 ```
 
 **Model returns errors:**
 ```bash
-# Check if key is set
-docker compose exec litellm env | grep API_KEY
-# Test specific model
-curl http://localhost:4001/v1/models -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+# Check health
+curl http://localhost:5002/health -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+# List models
+curl http://localhost:5002/v1/models -H "Authorization: Bearer $LITELLM_MASTER_KEY"
 ```
 
 **Escalation loops:**

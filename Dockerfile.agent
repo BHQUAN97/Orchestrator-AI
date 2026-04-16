@@ -1,0 +1,40 @@
+# ============================================
+# AI Orchestrator — Coding Agent Sandbox
+# Build: docker build -f Dockerfile.agent -t orcai-agent .
+# Run:   docker compose -f docker-compose.yaml -f docker-compose.agent.yaml up coding-agent
+# ============================================
+
+FROM node:22-alpine
+
+LABEL maintainer="bombi19m6@gmail.com"
+LABEL description="AI Orchestrator coding agent sandbox — multi-model agent engine"
+LABEL version="2.0"
+
+# Alpine khong co git/bash mac dinh
+RUN apk add --no-cache git bash
+
+WORKDIR /app
+
+# Copy dependency files truoc de tan dung Docker layer cache
+COPY package.json package-lock.json ./
+RUN npm ci --production
+
+# Copy source directories
+COPY bin/ ./bin/
+COPY lib/ ./lib/
+COPY tools/ ./tools/
+COPY router/ ./router/
+COPY cache/ ./cache/
+COPY graph/ ./graph/
+COPY prompts/ ./prompts/
+COPY skills/ ./skills/
+COPY index.js ./
+
+# Workspace directory cho mounted projects
+RUN mkdir -p /workspace
+
+ENV NODE_ENV=production
+ENV LITELLM_URL=http://litellm:4000
+
+ENTRYPOINT ["node", "bin/orcai.js"]
+CMD ["--interactive", "--project", "/workspace"]
