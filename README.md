@@ -1,4 +1,4 @@
-# AI Orchestrator v2.1
+# AI Orchestrator v2.2
 
 Multi-model AI coding agent system: **Hermes Brain** (memory, learning, self-improve) + **Orchestrator Hands** (scan, plan, route, execute).
 
