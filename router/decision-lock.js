@@ -77,14 +77,10 @@ class DecisionLock {
   /**
    * Check xem scope có bị lock không
    * Agent gọi trước khi thay đổi gì trong scope đó
+   * Performance: batch in-memory unlock, save 1 lan thay vi N lan
    */
   isLocked(scope) {
-    // Auto-unlock nếu lock đã hết hạn TTL
-    this.decisions.forEach(d => {
-      if (d.status === 'active' && this._isExpired(d)) {
-        this._autoUnlock(d, 'TTL expired');
-      }
-    });
+    if (this._unlockExpiredInMemory() > 0) this._save();
 
     return this.decisions.some(d =>
       d.status === 'active' && (d.scope === scope || d.relatedFiles.includes(scope))
@@ -121,12 +117,9 @@ class DecisionLock {
    * Trả về: { allowed: true } hoặc { allowed: false, blockedBy: [...] }
    */
   validate(scope, agentRole) {
-    // Auto-unlock nếu lock đã hết hạn TTL
-    this.decisions.forEach(d => {
-      if (d.status === 'active' && this._isExpired(d)) {
-        this._autoUnlock(d, 'TTL expired');
-      }
-    });
+    // Batch unlock expired in-memory, save 1 lan — tranh I/O explosion khi 10
+    // parallel subtasks moi cai goi validate() → 10 sync writes cho cung expired locks
+    if (this._unlockExpiredInMemory() > 0) this._save();
 
     const locks = this.getLockedFor(scope);
 
@@ -181,19 +174,26 @@ class DecisionLock {
    * Dọn tất cả lock đã hết hạn TTL — tự động unlock với lý do "TTL expired"
    */
   cleanExpired() {
-    let cleaned = 0;
-    this.decisions.forEach(d => {
+    const cleaned = this._unlockExpiredInMemory();
+    if (cleaned > 0) this._save();
+    return { cleaned };
+  }
+
+  /**
+   * Helper: unlock expired locks in-memory (KHONG save) — caller chiu trach nhiem save
+   * Tach ra de share giua isLocked/validate/cleanExpired va batch save
+   */
+  _unlockExpiredInMemory() {
+    let count = 0;
+    for (const d of this.decisions) {
       if (d.status === 'active' && this._isExpired(d)) {
-        // Unlock in-memory, KHONG ghi file tung entry — batch save cuoi
         d.status = 'unlocked';
         d.unlockedAt = new Date().toISOString();
         d.unlockReason = 'auto: TTL expired';
-        cleaned++;
+        count++;
       }
-    });
-    // Batch save 1 lan thay vi N lan
-    if (cleaned > 0) this._save();
-    return { cleaned };
+    }
+    return count;
   }
 
   // === Private ===
@@ -204,16 +204,6 @@ class DecisionLock {
   _isExpired(lock) {
     const ttl = lock.ttl || DEFAULT_LOCK_TTL;
     return Date.now() - new Date(lock.lockedAt).getTime() > ttl;
-  }
-
-  /**
-   * Tự động unlock — dùng cho TTL expired, không cần user can thiệp
-   */
-  _autoUnlock(entry, reason) {
-    entry.status = 'unlocked';
-    entry.unlockedAt = new Date().toISOString();
-    entry.unlockReason = `auto: ${reason}`;
-    this._save();
   }
 
   _load() {

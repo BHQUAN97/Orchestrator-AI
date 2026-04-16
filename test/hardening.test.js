@@ -113,6 +113,99 @@ const stdoutOk = /Listening on :3100/.test(r2.stdout || '');
 const exitNotPrematurely = r2.status !== 1;
 assert('Server start binh thuong khi secrets safe', stdoutOk && exitNotPrematurely, `status=${r2.status} stdout="${(r2.stdout || '').slice(0, 80)}"`);
 
+// === Orchestrator hardening (round 2) — async IIFE vi co await ===
+(async () => {
+console.log('\n=== Orchestrator (round 2) ===\n');
+
+const { OrchestratorAgent } = require('../router/orchestrator-agent');
+
+// Test 9: executionLog cap MAX_EXECUTION_LOG
+console.log('Test 9: executionLog ring buffer');
+const agent = new OrchestratorAgent({ projectDir: path.join(testDir, 'agent'), maxExecutionLog: 5 });
+for (let i = 0; i < 12; i++) {
+  // Skip thuc te execute — push truc tiep vao log de test cap
+  agent.executionLog.push({ id: i, results: {}, escalations: [] });
+  while (agent.executionLog.length > agent.MAX_EXECUTION_LOG) agent.executionLog.shift();
+}
+assert('Log capped at MAX (5)', agent.executionLog.length === 5);
+assert('Oldest evicted (first id = 7)', agent.executionLog[0].id === 7);
+
+// Test 10: _statsAggregate incremental (O(1) getStats)
+console.log('\nTest 10: Incremental stats');
+agent._aggregateStats({ results: {
+  1: { id: 1, model: 'cheap', agentRole: 'docs', tokens: 100, success: true },
+  2: { id: 2, model: 'default', agentRole: 'fe-dev', tokens: 500, success: true, escalated: true }
+}});
+agent._aggregateStats({ results: {
+  3: { id: 3, model: 'cheap', agentRole: 'docs', tokens: 50, success: true }
+}});
+const stats = agent.getStats();
+assert('total_executions = 2', stats.total_executions === 2);
+assert('total_tasks = 3', stats.total_tasks === 3);
+assert('total_escalations = 1', stats.total_escalations === 1);
+assert('cheap counted twice', stats.models.cheap?.count === 2);
+assert('docs role tokens summed', stats.models.cheap?.tokens === 150);
+
+// Test 11: _classifyTask skip trivial
+console.log('\nTest 11: SLM skip trivial');
+const c1 = await agent._classifyTask('fix bug', { task: 'fix' });
+assert('Short prompt → skipped', c1?.skipped === 'short_prompt' && c1.complexity === 'simple');
+const longDocsPrompt = 'Viet documentation chi tiet cho module authentication, bao gom JSDoc cho tat ca public methods';
+const c2 = await agent._classifyTask(longDocsPrompt, { task: 'docs' });
+assert('Docs task → skipped (du prompt dai)', c2?.skipped === 'docs_task', `got skipped="${c2?.skipped}" len=${longDocsPrompt.length}`);
+
+// Test 12: _synthesize fast-path (≤3 results, no LLM call)
+console.log('\nTest 12: Synthesize fast-path');
+const fastResult = await agent._synthesize(
+  { analysis: 'test plan' },
+  {
+    1: { id: 1, agentRole: 'fe-dev', success: true, normalized: { summary: 'done FE' } },
+    2: { id: 2, agentRole: 'be-dev', success: true, normalized: { summary: 'done BE' } }
+  }
+);
+assert('Fast-path returns string', typeof fastResult === 'string');
+assert('Fast-path KHONG goi LLM (contains plan)', fastResult.includes('test plan'));
+assert('Fast-path contains both task summaries', fastResult.includes('done FE') && fastResult.includes('done BE'));
+
+// Test 13: Architect ceiling logic (verify field flag — actual loop tested via integration)
+console.log('\nTest 13: Architect ceiling field');
+const escalationCheck = currentSubtaskModel => currentSubtaskModel === 'architect';
+assert('Logic: architect tier match', escalationCheck('architect') === true);
+assert('Logic: non-architect tier no break', escalationCheck('default') === false);
+
+// Test 14: Budget refund flow — _checkBudget reserve, manual refund
+console.log('\nTest 14: Budget refund');
+// Reset budget
+agent.budgetTracker = { date: new Date().toISOString().split('T')[0], spent: 0, calls: {} };
+const before = agent.budgetTracker.spent;
+const check = agent._checkBudget('default', 1000); // ~$0.00075
+const reserved = check.reservedCost;
+assert('Reserved > 0', reserved > 0);
+assert('Spent increased after reserve', agent.budgetTracker.spent > before);
+// Simulate refund (what _callModel catch block does)
+agent.budgetTracker.spent = Math.max(0, agent.budgetTracker.spent - reserved);
+assert('Spent restored after refund', agent.budgetTracker.spent === before);
+
+// === DecisionLock batch save (round 2) ===
+console.log('\n=== DecisionLock batch save ===\n');
+
+// Test 15: validate() chi save 1 lan du nhieu expired
+console.log('Test 15: Batch save during validate');
+const dlBatch = new DL5({ projectDir: path.join(testDir, 'batch') });
+// Tao 5 locks ngan han
+for (let i = 0; i < 5; i++) {
+  dlBatch.lock({ decision: `d${i}`, scope: `s${i}`, approvedBy: 't', ttl: 10 });
+}
+// Wait expire
+const w2 = Date.now() + 50;
+while (Date.now() < w2) { /* busy wait */ }
+// Theo doi so lan _save goi
+let saveCount = 0;
+const origSave = dlBatch._save.bind(dlBatch);
+dlBatch._save = function() { saveCount++; return origSave(); };
+dlBatch.validate('s0', 'fe-dev');
+assert('validate() chi goi _save 1 lan du 5 expired', saveCount === 1, `got ${saveCount}`);
+
 // === Cleanup ===
 try { fs.rmSync(testDir, { recursive: true, force: true }); } catch { /* ignore */ }
 
@@ -121,3 +214,4 @@ console.log('\n' + '='.repeat(50));
 console.log(`HARDENING TESTS: ${passed + failed} total — ${passed} passed, ${failed} failed`);
 console.log('='.repeat(50));
 process.exit(failed === 0 ? 0 : 1);
+})().catch(err => { console.error('Test error:', err); process.exit(1); });

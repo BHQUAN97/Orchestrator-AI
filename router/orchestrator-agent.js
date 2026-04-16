@@ -160,6 +160,19 @@ class OrchestratorAgent {
     // Load budget tu disk (persist qua process restart)
     this._loadBudget();
 
+    // Flush budget khi process exit — dam bao khong mat data debounced
+    if (!OrchestratorAgent._exitHookRegistered) {
+      OrchestratorAgent._exitHookRegistered = true;
+      OrchestratorAgent._instances = OrchestratorAgent._instances || [];
+      process.on('exit', () => {
+        for (const inst of OrchestratorAgent._instances) {
+          try { inst.flushBudget(); } catch { /* ignore */ }
+        }
+      });
+    }
+    OrchestratorAgent._instances = OrchestratorAgent._instances || [];
+    OrchestratorAgent._instances.push(this);
+
     // Core modules
     this.smartRouter = new SmartRouter({
       availableModels: options.availableModels || ['opus-4.6', 'sonnet-4.6', 'deepseek-v3.2', 'gemini-3-flash', 'gpt-5.4-mini'],
@@ -187,8 +200,11 @@ class OrchestratorAgent {
     this.techLeadReview = options.techLeadReview !== false; // Mặc định bật
     this.maxEscalations = options.maxEscalations || MAX_ESCALATIONS_PER_TASK;
 
-    // Logging
+    // Logging — bounded ring buffer, tranh memory leak khi process chay lau
     this.executionLog = [];
+    this.MAX_EXECUTION_LOG = options.maxExecutionLog || 100;
+    // Stats incremental — KHONG iterate executionLog moi lan getStats() (O(N) → O(1))
+    this._statsAggregate = { total_executions: 0, total_tasks: 0, total_escalations: 0, models: {}, agents: {} };
 
     // Pipeline Tracer — unified tracing cho debug
     this.tracer = new PipelineTracer({
@@ -210,6 +226,14 @@ class OrchestratorAgent {
    * Chi phi: ~$0.00005 (50 tokens, cheap model), latency ~200-500ms
    */
   async _classifyTask(userPrompt, context = {}) {
+    // Skip SLM cho task hien nhien — tiet kiem ~$0.00005 + 200-500ms latency
+    // Trigger fast-path luon cho task ngan / task='docs' / task='review' khong files
+    if (typeof userPrompt === 'string' && userPrompt.length < 50) {
+      return { complexity: 'simple', intent: 'fix', domain: 'docs', skipped: 'short_prompt' };
+    }
+    if (context.task === 'docs') {
+      return { complexity: 'simple', intent: 'docs', domain: 'docs', skipped: 'docs_task' };
+    }
     try {
       if (!this._slmClassifier) {
         const { SLMClassifier } = require('./slm-classifier');
@@ -224,8 +248,11 @@ class OrchestratorAgent {
         prompt: userPrompt,
         project: context.project || ''
       });
-    } catch {
-      return null; // SLM fail → fallback ve full flow
+    } catch (err) {
+      // Track fail rate de phat hien neu SLM bi degraded
+      this._slmFails = (this._slmFails || 0) + 1;
+      if (this._slmFails % 10 === 0) console.warn(`⚠️  SLM classifier failed ${this._slmFails} times — check LiteLLM`);
+      return null;
     }
   }
 
@@ -564,7 +591,32 @@ class OrchestratorAgent {
     };
 
     this.executionLog.push(execution);
+    // Cap log: drop oldest khi vuot MAX (stats van duoc giu nhe nho aggregate rieng)
+    while (this.executionLog.length > this.MAX_EXECUTION_LOG) this.executionLog.shift();
+    // Aggregate stats incrementally — chi cong them, khong recompute toan log
+    this._aggregateStats(execution);
     return execution;
+  }
+
+  /**
+   * Cong don stats khi them 1 execution — O(subtasks) thay vi O(N×M) khi getStats
+   */
+  _aggregateStats(execution) {
+    this._statsAggregate.total_executions++;
+    for (const result of Object.values(execution.results)) {
+      this._statsAggregate.total_tasks++;
+      const m = result.model;
+      if (!this._statsAggregate.models[m]) this._statsAggregate.models[m] = { count: 0, tokens: 0 };
+      this._statsAggregate.models[m].count++;
+      this._statsAggregate.models[m].tokens += result.tokens || 0;
+      const role = result.agentRole || 'unknown';
+      if (!this._statsAggregate.agents[role]) this._statsAggregate.agents[role] = { count: 0, escalated: 0 };
+      this._statsAggregate.agents[role].count++;
+      if (result.escalated) {
+        this._statsAggregate.agents[role].escalated++;
+        this._statsAggregate.total_escalations++;
+      }
+    }
   }
 
   /**
@@ -679,6 +731,15 @@ class OrchestratorAgent {
     let lastResult = null;
 
     while (escalationCount <= this.maxEscalations) {
+      // Architect ceiling: neu da o tier cao nhat (architect) va da chay 1 lan,
+      // KHONG retry tiep — moi lan goi architect ton ~$0.045/1k. Truoc day loop
+      // se goi architect 3 lan vo ich vi khong co tier nao cao hon.
+      if (currentSubtask.model === 'architect' && escalationCount > 0) {
+        console.log(`🛑 [${subtask.id}] Architect ceiling — break (avoid burning $0.045/1k)`);
+        if (lastResult) lastResult.escalation_ceiling_reached = true;
+        break;
+      }
+
       // Execute subtask
       lastResult = await this._executeSubtask(currentSubtask, context, previousResults);
 
@@ -933,15 +994,30 @@ class OrchestratorAgent {
 
   /**
    * Tổng hợp kết quả cuối cùng
+   * Fast-path: ≤3 results va khong fail → format thuan, KHONG goi LLM (tiet kiem token)
+   * Slow-path: nhieu result/co fail → goi dispatcher LLM tong hop
    */
   async _synthesize(plan, results) {
+    const arr = Object.values(results);
+    const failed = arr.filter(r => !r.success);
+
+    // Fast-path: it ket qua, khong fail → concat template, ~0 token
+    if (arr.length <= 3 && failed.length === 0) {
+      const lines = arr.map(r => {
+        const summary = (r.normalized?.summary || r.output || '').slice(0, 300);
+        return `• [${r.id}/${r.agentRole}]${r.escalated ? ' (escalated)' : ''}: ${summary}`;
+      });
+      return `${plan.analysis}\n\n${lines.join('\n')}`;
+    }
+
+    // Slow-path: complex result → goi LLM tong hop
     const summaryPrompt = `Tổng hợp kết quả các sub-tasks thành 1 kết quả thống nhất.
 Chỉ trả về kết quả cuối cùng, KHÔNG lặp lại từng bước.
 
 Plan: ${plan.analysis}
 
 Results:
-${Object.values(results).map(r =>
+${arr.map(r =>
   `[Task ${r.id}] (${r.agentRole}/${r.model})${r.escalated ? ' [ESCALATED]' : ''}: ${r.success ? (r.normalized?.summary || r.output).slice(0, 500) : 'FAILED: ' + r.output}`
 ).join('\n\n')}
 
@@ -1112,15 +1188,35 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   }
 
   /**
-   * Luu budget xuong disk sau moi lan track cost
+   * Luu budget xuong disk — debounced 5s de tranh sync write moi LLM call
+   * (50 calls/min = 50 sync write block event loop). force=true khi shutdown.
+   * Tradeoff: crash co the mat ~5s data; chap nhan duoc cho budget tracking.
    */
-  _saveBudget() {
+  _saveBudget(force = false) {
+    const now = Date.now();
+    if (!force && this._lastBudgetSave && now - this._lastBudgetSave < 5000) {
+      // Schedule lazy save 1 lan thay vi spam
+      if (!this._budgetSavePending) {
+        this._budgetSavePending = setTimeout(() => {
+          this._budgetSavePending = null;
+          this._saveBudget(true);
+        }, 5000 - (now - this._lastBudgetSave));
+      }
+      return;
+    }
+    this._lastBudgetSave = now;
+    if (this._budgetSavePending) { clearTimeout(this._budgetSavePending); this._budgetSavePending = null; }
     const fs = require('fs');
     const path = require('path');
     const dir = path.dirname(this._getBudgetPath());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(this._getBudgetPath(), JSON.stringify(this.budgetTracker, null, 2));
   }
+
+  /**
+   * Flush budget xuong disk ngay — goi tu graceful shutdown
+   */
+  flushBudget() { this._saveBudget(true); }
 
   // =============================================
   // BUDGET TRACKING — gioi han $2/ngay
@@ -1224,7 +1320,19 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
     const actualModel = budgetCheck.model;
     const reservedCost = budgetCheck.reservedCost || 0;
 
-    return this._callModelWithRetry(actualModel, systemPrompt, userContent, 3, reservedCost);
+    try {
+      return await this._callModelWithRetry(actualModel, systemPrompt, userContent, 3, reservedCost);
+    } catch (err) {
+      // Refund reserved cost neu retry exhausted/timeout/network fail — tranh false depletion.
+      // _trackCost khong chay khi throw → reserved bi giu lai vinh vien neu khong refund.
+      if (reservedCost > 0) {
+        await this._withBudgetLock(() => {
+          this.budgetTracker.spent = Math.max(0, this.budgetTracker.spent - reservedCost);
+          this._saveBudget();
+        });
+      }
+      throw err;
+    }
   }
 
   async _callModelWithRetry(model, systemPrompt, userContent, retries, reservedCost = 0) {
@@ -1303,37 +1411,15 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   // =============================================
 
   getStats() {
-    const stats = {
-      total_executions: this.executionLog.length,
-      total_tasks: 0,
-      total_escalations: 0,
-      models: {},
-      agents: {},
+    // O(1) — tra ve aggregate da maintain incremental, khong iterate executionLog
+    // Truoc day O(N×M) → spam /api/stats co the pin CPU khi N lon
+    return {
+      ...this._statsAggregate,
       decisions_locked: this.decisionLock.getActive().length,
-      tech_lead: this.techLead.getStats()
+      tech_lead: this.techLead.getStats(),
+      log_size: this.executionLog.length,
+      log_capped: this.executionLog.length >= this.MAX_EXECUTION_LOG
     };
-
-    for (const exec of this.executionLog) {
-      for (const result of Object.values(exec.results)) {
-        stats.total_tasks++;
-
-        // Model stats
-        if (!stats.models[result.model]) stats.models[result.model] = { count: 0, tokens: 0 };
-        stats.models[result.model].count++;
-        stats.models[result.model].tokens += result.tokens || 0;
-
-        // Agent stats
-        const role = result.agentRole || 'unknown';
-        if (!stats.agents[role]) stats.agents[role] = { count: 0, escalated: 0 };
-        stats.agents[role].count++;
-        if (result.escalated) {
-          stats.agents[role].escalated++;
-          stats.total_escalations++;
-        }
-      }
-    }
-
-    return stats;
   }
 }
 
