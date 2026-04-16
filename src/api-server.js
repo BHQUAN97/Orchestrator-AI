@@ -66,6 +66,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5001,h
 // === Rate Limiter — sliding window per IP ===
 const MAX_REQUESTS_PER_MINUTE = parseInt(process.env.RATE_LIMIT || '60');
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+const RATE_MAP_MAX_ENTRIES = parseInt(process.env.RATE_MAP_MAX || '10000');
 const rateLimitMap = new Map(); // IP → { count, resetAt }
 
 function checkRateLimit(ip) {
@@ -73,6 +74,13 @@ function checkRateLimit(ip) {
   let entry = rateLimitMap.get(ip);
 
   if (!entry || now > entry.resetAt) {
+    // Hard cap: neu map vuot nguong → evict 20% entry cu nhat (LRU-ish)
+    // Tranh memory blowup khi attacker gui tu hang nghin IP gia
+    if (rateLimitMap.size >= RATE_MAP_MAX_ENTRIES) {
+      const sorted = [...rateLimitMap.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt);
+      const evictCount = Math.ceil(RATE_MAP_MAX_ENTRIES * 0.2);
+      for (let i = 0; i < evictCount; i++) rateLimitMap.delete(sorted[i][0]);
+    }
     entry = { count: 0, resetAt: now + 60000 };
     rateLimitMap.set(ip, entry);
   }

@@ -120,11 +120,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     const token = createToken(username);
+    // SameSite=Strict: chong CSRF tot nhat — cookie KHONG gui khi cross-site nav.
+    // Tradeoff: link tu site khac → portal se khong auto-login, user phai login lai.
     const cookieOpts = [
       `${COOKIE_NAME}=${token}`,
       'Path=/',
       'HttpOnly',
-      'SameSite=Lax',
+      'SameSite=Strict',
       `Max-Age=${TOKEN_TTL / 1000}`,
     ];
     if (DOMAIN) cookieOpts.push(`Domain=${DOMAIN}`);

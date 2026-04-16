@@ -1238,24 +1238,46 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
     };
     const maxTokens = MAX_TOKENS[model] || 4000;
 
-    const response = await fetch(`${this.litellmUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.litellmKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent }
-        ],
-        max_tokens: maxTokens,
-        temperature: 0.3
-      })
-    });
+    // Timeout 90s/call — tranh fetch hang vo tan khi LiteLLM treo
+    const TIMEOUT_MS = parseInt(process.env.LITELLM_TIMEOUT_MS) || 90000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const data = await response.json();
+    let response, data;
+    try {
+      response = await fetch(`${this.litellmUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.litellmKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+          ],
+          max_tokens: maxTokens,
+          temperature: 0.3
+        }),
+        signal: controller.signal
+      });
+      data = await response.json();
+    } catch (err) {
+      clearTimeout(timeoutId);
+      // Network err / timeout / abort → retry voi exponential backoff
+      const isTimeout = err.name === 'AbortError';
+      const isNetwork = err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || /fetch failed|network/i.test(err.message);
+      if (retries > 0 && (isTimeout || isNetwork)) {
+        const waitSec = Math.min(15, 2 ** (4 - retries));
+        const reason = isTimeout ? `timeout >${TIMEOUT_MS}ms` : `network ${err.code || err.message}`;
+        console.log(`⏳ LiteLLM ${reason}, retry in ${waitSec}s (${retries} retries left)`);
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        return this._callModelWithRetry(model, systemPrompt, userContent, retries - 1, reservedCost);
+      }
+      throw new Error(`LiteLLM call failed: ${isTimeout ? 'timeout' : err.message}`);
+    }
+    clearTimeout(timeoutId);
 
     if (data.error) {
       const errMsg = data.error.message || JSON.stringify(data.error);

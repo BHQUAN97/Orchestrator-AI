@@ -19,6 +19,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// TTL default — configurable qua env DECISION_LOCK_TTL_HOURS (mac dinh 4h)
+const DEFAULT_LOCK_TTL = (parseFloat(process.env.DECISION_LOCK_TTL_HOURS) || 4) * 60 * 60 * 1000;
+
 // === Decision Lock Class ===
 class DecisionLock {
   constructor(options = {}) {
@@ -29,8 +32,10 @@ class DecisionLock {
 
   /**
    * Lock 1 quyết định — chỉ Tech Lead được gọi
+   * TTL default lay tu env DECISION_LOCK_TTL_HOURS (mac dinh 4h, truoc day 24h)
+   * Lock 24h qua dai → block cong viec sau khi feature da merge/revert
    */
-  lock({ decision, scope, approvedBy, reason = '', relatedFiles = [], ttl = 86400000 }) {
+  lock({ decision, scope, approvedBy, reason = '', relatedFiles = [], ttl = DEFAULT_LOCK_TTL }) {
     const id = `dec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     const entry = {
@@ -197,7 +202,7 @@ class DecisionLock {
    * Kiểm tra lock đã hết hạn chưa — so sánh thời gian hiện tại với lockedAt + ttl
    */
   _isExpired(lock) {
-    const ttl = lock.ttl || 86400000; // mặc định 24h
+    const ttl = lock.ttl || DEFAULT_LOCK_TTL;
     return Date.now() - new Date(lock.lockedAt).getTime() > ttl;
   }
 
