@@ -5,7 +5,7 @@ echo  Testing all models through LiteLLM
 echo ==========================================
 echo.
 
-set PROXY=http://localhost:4001
+set PROXY=http://localhost:5002
 set KEY=sk-master-change-me
 
 echo [1/4] default (Kimi K2.5)...

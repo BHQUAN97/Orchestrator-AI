@@ -53,18 +53,18 @@ echo.
 echo [5/5] Verifying...
 timeout /t 15 /nobreak >nul
 
-curl -s http://localhost:4001/health -H "Authorization: Bearer sk-master-change-me" >nul 2>&1
+curl -s http://localhost:5002/health -H "Authorization: Bearer sk-master-change-me" >nul 2>&1
 if errorlevel 1 (
     echo WARNING: LiteLLM not ready yet. Wait a moment and try start.bat
 ) else (
     echo LiteLLM: OK
 )
 
-curl -s http://localhost:9080 >nul 2>&1
+curl -s http://localhost:5003/health >nul 2>&1
 if errorlevel 1 (
-    echo WARNING: Dashboard not ready
+    echo WARNING: Orchestrator not ready
 ) else (
-    echo Dashboard: OK
+    echo Orchestrator: OK
 )
 
 echo.
@@ -73,6 +73,6 @@ echo  Setup complete!
 echo ==========================================
 echo.
 echo  Next: Run start.bat to open dashboards
-echo  Or:   http://localhost:9080
+echo  Or:   http://localhost:5002/ui
 echo.
 pause

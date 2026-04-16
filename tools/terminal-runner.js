@@ -8,6 +8,14 @@
  * - Chặn lệnh nguy hiểm (rm -rf /, drop database, git push --force)
  * - Trả stdout + stderr + exit code
  * - Stream output cho long-running commands
+ *
+ * === DEFENSE IN DEPTH ===
+ * Tuyến phòng thủ chính là LLM system prompt — agent được hướng dẫn
+ * chỉ chạy các lệnh an toàn trong phạm vi task. Blocklist ở đây là
+ * tuyến phòng thủ CUỐI CÙNG (last resort) để chặn các lệnh phá hoại
+ * trong trường hợp prompt injection hoặc hallucination vượt qua
+ * system prompt. Không nên dựa hoàn toàn vào blocklist vì regex
+ * luôn có thể bị bypass bằng encoding/obfuscation.
  */
 
 const { spawn } = require('child_process');
@@ -15,16 +23,58 @@ const path = require('path');
 const treeKill = require('tree-kill');
 
 // Lệnh bị cấm hoàn toàn — không có cách nào chạy
+// Lưu ý: đây là tuyến phòng thủ cuối, primary defense là system prompt
 const BLOCKED_COMMANDS = [
-  /rm\s+(-rf?|--recursive)\s+[\/\\]($|\s)/,    // rm -rf /
-  /del\s+\/[sq]\s+[a-z]:\\/i,                    // del /s /q C:\
-  /format\s+[a-z]:/i,                             // format C:
-  /drop\s+database/i,                              // DROP DATABASE
-  /drop\s+table/i,                                 // DROP TABLE (cần confirm)
-  /truncate\s+table/i,                             // TRUNCATE TABLE
-  />\s*\/dev\/sda/,                                // > /dev/sda
-  /mkfs\./,                                         // mkfs.ext4
-  /:(){ :\|:& };:/,                                // fork bomb
+  // --- Xóa hệ thống ---
+  /rm\s+(-rf?|--recursive)\s+[\/\\]($|\s)/,       // rm -rf /
+  /rm\s+(-rf?|--recursive)\s+[\/\\]\*/,            // rm -rf /* (với glob)
+  /rm\s+(-rf?|--recursive)\s+~\//,                 // rm -rf ~/ (xóa home)
+  /del\s+\/[sq]\s+[a-z]:\\/i,                      // del /s /q C:\
+  /format\s+[a-z]:/i,                               // format C:
+
+  // --- find + delete toàn bộ ---
+  /find\s+[\/\\]\s+.*-delete/,                      // find / -delete
+  /find\s+[\/\\]\s+.*-exec\s+rm/,                   // find / -exec rm
+
+  // --- Database destruction ---
+  /drop\s+database/i,                                // DROP DATABASE
+  /drop\s+table/i,                                   // DROP TABLE
+  /truncate\s+table/i,                               // TRUNCATE TABLE
+
+  // --- Ghi đè thiết bị / phá filesystem ---
+  />\s*\/dev\/sd[a-z]/,                              // > /dev/sda
+  /dd\s+.*of=\/dev\/sd[a-z]/,                        // dd if=/dev/zero of=/dev/sda
+  /dd\s+.*of=\/dev\/nvme/,                           // dd to NVMe devices
+  /mkfs\./,                                           // mkfs.ext4
+
+  // --- Fork bomb và biến thể ---
+  /:\(\)\s*\{\s*:\|:&\s*\};:/,                      // :(){ :|:& };: classic
+  /\.\(\)\s*\{\s*\.\|\.\&\s*\};/,                   // biến thể dùng dot
+  /fork\s*bomb/i,                                     // comment/intent detection
+
+  // --- Download + execute (pipe to shell) ---
+  /curl\s+.*\|\s*(ba)?sh/i,                          // curl ... | bash/sh
+  /wget\s+.*\|\s*(ba)?sh/i,                          // wget ... | bash/sh
+  /curl\s+.*\|\s*python/i,                           // curl ... | python
+  /wget\s+.*\|\s*python/i,                           // wget ... | python
+  /curl\s+.*\|\s*perl/i,                             // curl ... | perl
+  /wget\s+.*\|\s*perl/i,                             // wget ... | perl
+  /curl\s+.*\|\s*ruby/i,                             // curl ... | ruby
+  /wget\s+.*\|\s*ruby/i,                             // wget ... | ruby
+
+  // --- Python inline destruction ---
+  /python[3]?\s+-c\s+.*shutil\.rmtree\s*\(\s*['"]\/['"]/i, // python -c "shutil.rmtree('/')"
+  /python[3]?\s+-c\s+.*os\.system\s*\(/i,            // python -c "os.system(...)"
+
+  // --- Windows: PowerShell encoded commands (bypass detection) ---
+  // Match -enc, -encodedcommand nhung KHONG match -ExecutionPolicy, -ErrorAction
+  /powershell\s+.*-enc(odedcommand)?(\s|$)/i,       // powershell -enc ... (base64 hidden)
+  /pwsh\s+.*-enc(odedcommand)?(\s|$)/i,             // pwsh -enc ...
+
+  // --- Force push to main/master (phá code chung) ---
+  /git\s+push\s+.*--force.*\s+(main|master)/i,      // git push --force origin main
+  /git\s+push\s+.*\s+(main|master)\s+.*--force/i,   // git push origin main --force
+  /git\s+push\s+-f\s+.*\s+(main|master)/i,          // git push -f origin main
 ];
 
 // Lệnh cần confirm từ user trước khi chạy
@@ -37,6 +87,23 @@ const CONFIRM_COMMANDS = [
   { pattern: /docker\s+rm/i, reason: 'Xóa Docker container' },
   { pattern: /docker\s+system\s+prune/i, reason: 'Dọn dẹp Docker system' },
   { pattern: /npm\s+install\s+-g/i, reason: 'Cài package global' },
+
+  // --- Download từ URL bên ngoài (không pipe to shell thì confirm) ---
+  { pattern: /curl\s+https?:\/\//i, reason: 'Download từ URL bên ngoài' },
+  { pattern: /wget\s+https?:\/\//i, reason: 'Download từ URL bên ngoài' },
+
+  // --- chmod đệ quy nguy hiểm ---
+  { pattern: /chmod\s+(-R|--recursive)\s+777/i, reason: 'chmod 777 đệ quy — mở toàn bộ quyền' },
+  { pattern: /chmod\s+777\s+.*-R/i, reason: 'chmod 777 đệ quy — mở toàn bộ quyền' },
+
+  // --- eval / bash -c wrapping (có thể ẩn lệnh nguy hiểm) ---
+  { pattern: /eval\s+\$\(/i, reason: 'eval $(...) — có thể ẩn lệnh nguy hiểm' },
+  { pattern: /bash\s+-c\s+["']/i, reason: 'bash -c — chạy lệnh gián tiếp, kiểm tra nội dung' },
+  { pattern: /sh\s+-c\s+["']/i, reason: 'sh -c — chạy lệnh gián tiếp, kiểm tra nội dung' },
+
+  // --- npm run với script không rõ nội dung ---
+  { pattern: /npm\s+run\s+(?!start|dev|build|test|lint|format|typecheck)/i, reason: 'npm run script không chuẩn — kiểm tra nội dung script' },
+  { pattern: /npx\s+/i, reason: 'npx — chạy package trực tiếp, cần verify' },
 ];
 
 // Timeout mặc định và tối đa
@@ -88,9 +155,16 @@ class TerminalRunner {
       };
     }
 
-    // 2. Check confirm
+    // 2. Check confirm — neu khong co callback thi BLOCK lenh can confirm (an toan)
     const confirmCheck = this._checkNeedsConfirm(command);
-    if (confirmCheck.needsConfirm && this.confirmCallback) {
+    if (confirmCheck.needsConfirm) {
+      if (!this.confirmCallback) {
+        return {
+          success: false,
+          error: `BLOCKED: "${confirmCheck.reason}" — cần confirm nhưng không có confirm callback. Cấu hình onConfirm khi tạo TerminalRunner.`,
+          exit_code: -1
+        };
+      }
       const confirmed = await this.confirmCallback(command, confirmCheck.reason);
       if (!confirmed) {
         return {

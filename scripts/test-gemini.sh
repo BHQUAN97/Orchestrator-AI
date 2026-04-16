@@ -4,7 +4,7 @@
 # Chay: bash test-gemini.sh
 # ============================================
 
-PROXY="http://localhost:4001"
+PROXY="http://localhost:5002"
 KEY="sk-master-change-me"
 
 echo "=========================================="
@@ -104,9 +104,9 @@ echo "=========================================="
 echo ""
 echo " Models: default, smart, fast, cheap — tat ca dung Gemini"
 echo ""
-echo " Dashboard:     http://localhost:4001/ui"
-echo " Orchestrator:  http://localhost:8080"
-echo " Hermes:        http://localhost:3000"
+echo " Dashboard:     http://localhost:5002/ui"
+echo " Orchestrator:  http://localhost:5003"
+echo " Hermes:        http://localhost:5000"
 echo ""
 
 # Fetch spend

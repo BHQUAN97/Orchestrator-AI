@@ -41,7 +41,7 @@ echo Buoc tiep:
 echo   1. Mo VS Code
 echo   2. Mo Roo Code panel (Ctrl+Shift+P ^> "Roo Code")
 echo   3. Settings ^> API Provider ^> LiteLLM
-echo   4. Base URL: http://localhost:4001
+echo   4. Base URL: http://localhost:5002
 echo   5. API Key: sk-master-change-me
 echo   6. Chon model cho tung mode
 echo.

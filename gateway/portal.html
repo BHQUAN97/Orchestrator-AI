@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OrcAI — Portal</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-hover: #242836;
+    --border: #2a2e3b;
+    --primary: #6c5ce7;
+    --primary-hover: #7c6ef7;
+    --text: #e4e6eb;
+    --text-muted: #8b8fa3;
+    --text-dim: #5a5f73;
+    --success: #2ecc71;
+    --warning: #f39c12;
+    --danger: #e74c3c;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .header h1 { font-size: 20px; font-weight: 700; }
+  .header h1 span { color: var(--primary); }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .user-badge {
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    background: var(--bg);
+    border-radius: 6px;
+  }
+  .btn-logout {
+    padding: 6px 14px;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-logout:hover {
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    gap: 6px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-wrap: wrap;
+  }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--surface);
+    border-radius: 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+  }
+  .dot.ok { background: var(--success); }
+  .dot.warn { background: var(--warning); }
+  .dot.err { background: var(--danger); }
+
+  /* Grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .card:hover {
+    background: var(--surface-hover);
+    border-color: var(--primary);
+    transform: translateY(-2px);
+  }
+  .card-icon {
+    width: 42px; height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: 14px;
+  }
+  .card h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .card p {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .card .port {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 2px 8px;
+    background: var(--bg);
+    border-radius: 4px;
+    font-family: monospace;
+  }
+
+  /* Card icon colors */
+  .icon-hermes { background: rgba(46, 204, 113, 0.15); color: #2ecc71; }
+  .icon-webui { background: rgba(52, 152, 219, 0.15); color: #3498db; }
+  .icon-litellm { background: rgba(243, 156, 18, 0.15); color: #f39c12; }
+  .icon-api { background: rgba(108, 92, 231, 0.15); color: #6c5ce7; }
+  .icon-analytics { background: rgba(231, 76, 60, 0.15); color: #e74c3c; }
+
+  /* Quick actions */
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0 20px;
+    margin-top: 8px;
+  }
+
+  /* Mobile */
+  @media (max-width: 480px) {
+    .grid { padding: 12px; gap: 12px; }
+    .card { padding: 16px; }
+    .header { padding: 12px 16px; }
+    .status-bar { padding: 8px 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><span>Orc</span>AI</h1>
+  <div class="header-right">
+    <span class="user-badge" id="userBadge">...</span>
+    <button class="btn-logout" id="logoutBtn">Logout</button>
+  </div>
+</div>
+
+<div class="status-bar" id="statusBar">
+  <div class="status-pill"><span class="dot" id="dot-litellm"></span>LiteLLM</div>
+  <div class="status-pill"><span class="dot" id="dot-orchestrator"></span>Orchestrator</div>
+  <div class="status-pill"><span class="dot" id="dot-hermes"></span>Hermes</div>
+  <div class="status-pill"><span class="dot" id="dot-webui"></span>WebUI</div>
+  <div class="status-pill"><span class="dot" id="dot-analytics"></span>Analytics</div>
+</div>
+
+<p class="section-title">Services</p>
+<div class="grid">
+  <a href="/hermes/" class="card" target="_blank">
+    <div class="card-icon icon-hermes">&#x1f9e0;</div>
+    <h3>Hermes Brain</h3>
+    <p>Memory, vector DB, auto-learn, self-improve agent</p>
+    <span class="port">:5000</span>
+  </a>
+
+  <a href="/webui/" class="card" target="_blank">
+    <div class="card-icon icon-webui">&#x1f4ac;</div>
+    <h3>Open WebUI</h3>
+    <p>Chat interface — mobile friendly, multi-model</p>
+    <span class="port">:5001</span>
+  </a>
+
+  <a href="/litellm/ui" class="card" target="_blank">
+    <div class="card-icon icon-litellm">&#x26a1;</div>
+    <h3>LiteLLM Gateway</h3>
+    <p>API proxy — model routing, rate limit, spend tracking</p>
+    <span class="port">:5002</span>
+  </a>
+
+  <a href="/api/models" class="card" target="_blank">
+    <div class="card-icon icon-api">&#x1f916;</div>
+    <h3>Orchestrator API</h3>
+    <p>Scan, plan, route, execute — coding agent pipeline</p>
+    <span class="port">:5003</span>
+  </a>
+
+  <a href="/analytics/" class="card" target="_blank">
+    <div class="card-icon icon-analytics">&#x1f4ca;</div>
+    <h3>Cost Analytics</h3>
+    <p>Token usage, cost per model, daily trends, budget</p>
+    <span class="port">:5004</span>
+  </a>
+</div>
+
+<script>
+// Load user info
+fetch('/auth/me')
+  .then(r => r.json())
+  .then(d => {
+    if (d.user) document.getElementById('userBadge').textContent = d.user;
+    else window.location.href = '/login';
+  })
+  .catch(() => window.location.href = '/login');
+
+// Logout
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+});
+
+// Health checks
+async function checkHealth() {
+  const checks = [
+    { id: 'litellm', url: '/litellm/health' },
+    { id: 'orchestrator', url: '/health' },
+    { id: 'hermes', url: '/hermes/' },
+    { id: 'webui', url: '/webui/' },
+    { id: 'analytics', url: '/analytics/' },
+  ];
+  for (const c of checks) {
+    const dot = document.getElementById('dot-' + c.id);
+    try {
+      const r = await fetch(c.url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+      dot.className = r.ok ? 'dot ok' : 'dot warn';
+    } catch {
+      dot.className = 'dot err';
+    }
+  }
+}
+checkHealth();
+setInterval(checkHealth, 30000);
+</script>
+</body>
+</html>

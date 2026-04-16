@@ -13,17 +13,25 @@
 
 const { FileManager } = require('./file-manager');
 const { TerminalRunner } = require('./terminal-runner');
+const { ToolPermissions } = require('./permissions');
 
 class ToolExecutor {
   constructor(options = {}) {
     this.projectDir = options.projectDir || process.cwd();
+    this.agentRole = options.agentRole || 'builder';
 
-    this.fileManager = new FileManager({ projectDir: this.projectDir });
+    this.fileManager = new FileManager({
+      projectDir: this.projectDir,
+      readableRoots: options.readableRoots || []
+    });
     this.terminalRunner = new TerminalRunner({
       projectDir: this.projectDir,
       onConfirm: options.onConfirm || null,
       onOutput: options.onOutput || null
     });
+
+    // Phan quyen theo agent role
+    this.permissions = new ToolPermissions(this.agentRole);
 
     // Registry: tool name → handler function
     this.handlers = {
@@ -71,6 +79,18 @@ class ToolExecutor {
         error: `Tool không tồn tại: ${name}. Có: ${Object.keys(this.handlers).join(', ')}`
       });
     }
+
+    // Kiem tra quyen truoc khi chay — Layer 2 defense
+    const permCheck = this.permissions.check(name, args);
+    if (!permCheck.allowed) {
+      return this._formatResult(id, name, {
+        success: false,
+        error: `PERMISSION DENIED: ${permCheck.reason}`
+      });
+    }
+
+    // Ghi nhan vao permission counter TRUOC khi execute — dem ca success va fail de rate limit
+    this.permissions.recordCall(name);
 
     // Execute
     try {
@@ -166,6 +186,7 @@ class ToolExecutor {
     this.history = [];
     this.filesChanged.clear();
     this.commandsRun = [];
+    this.permissions.reset();
   }
 
   /**
@@ -183,6 +204,13 @@ class ToolExecutor {
       errors: this.history.filter(h => !h.success).length,
       total_elapsed_ms: this.history.reduce((sum, h) => sum + (h.elapsed_ms || 0), 0)
     };
+  }
+
+  /**
+   * Lay thong ke phan quyen — tools da dung, con lai bao nhieu
+   */
+  getPermissionUsage() {
+    return this.permissions.getUsage();
   }
 }
 

@@ -208,22 +208,15 @@ const TOOLS = [
 ];
 
 /**
- * Lấy tool definitions cho LLM call
- * Có thể filter theo role — FE dev không cần DB tools, reviewer chỉ cần read
+ * Lấy tool definitions cho LLM call — filter theo permission profile
+ * Layer 1 defense: LLM chi thay tools duoc phep (khong biet tools khac ton tai)
  */
 function getTools(agentRole = 'builder') {
-  // Reviewer chỉ cần đọc, không cần ghi
-  if (agentRole === 'reviewer') {
-    return TOOLS.filter(t => ['read_file', 'list_files', 'search_files', 'execute_command', 'task_complete'].includes(t.function.name));
-  }
+  const { ToolPermissions } = require('./permissions');
+  const perms = new ToolPermissions(agentRole);
+  const allowedNames = perms.getAllowedTools();
 
-  // Docs writer — đọc + ghi file, không cần execute
-  if (agentRole === 'docs') {
-    return TOOLS.filter(t => t.function.name !== 'execute_command');
-  }
-
-  // Builder/dev — full access
-  return TOOLS;
+  return TOOLS.filter(t => allowedNames.includes(t.function.name));
 }
 
 /**

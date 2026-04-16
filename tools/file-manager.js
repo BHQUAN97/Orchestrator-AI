@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const fg = require('fast-glob');
+const { ShadowGit } = require('./shadow-git');
 
 // Patterns bỏ qua khi list/search
 const IGNORE_PATTERNS = [
@@ -20,22 +21,68 @@ const IGNORE_PATTERNS = [
   '**/coverage/**', '**/.turbo/**', '**/vendor/**'
 ];
 
+// File nhạy cảm — chặn đọc ngay cả trong project dir
+const SENSITIVE_FILE_PATTERNS = [
+  '.env', '.env.local', '.env.production', '.env.staging', '.env.development'
+];
+const SENSITIVE_EXT = ['.key', '.pem'];
+
 class FileManager {
   constructor(options = {}) {
     this.projectDir = options.projectDir || process.cwd();
+    // Danh sách thư mục ngoài project được phép đọc (cross-project references)
+    this.readableRoots = (options.readableRoots || []).map(r => path.normalize(r));
+    // Shadow Git — auto snapshot truoc khi AI ghi file
+    this.shadowGit = new ShadowGit(this.projectDir, {
+      enabled: options.shadowGit !== false  // Mac dinh bat
+    });
   }
 
   /**
    * Validate & resolve path — chống path traversal
+   * Chặn CẢ đọc lẫn ghi ra ngoài project dir (trừ readableRoots)
    */
   _resolvePath(filePath) {
     const resolved = path.isAbsolute(filePath)
       ? path.normalize(filePath)
       : path.resolve(this.projectDir, filePath);
 
-    // Cho phep doc file trong project dir hoac subdirs
-    // Cung cho phep doc file tuyet doi (AI can doc file ngoai project)
-    // Nhung KHONG cho ghi ra ngoai project
+    return resolved;
+  }
+
+  /**
+   * Validate đường dẫn đọc — chặn path traversal + file nhạy cảm
+   * - Chỉ cho đọc trong project dir hoặc readableRoots
+   * - Luôn chặn file .env, .key, .pem dù ở đâu
+   */
+  _validateReadPath(filePath) {
+    const resolved = this._resolvePath(filePath);
+    const projectNorm = path.normalize(this.projectDir);
+
+    // Kiểm tra path nằm trong project dir hoặc readableRoots
+    const isInProject = resolved.startsWith(projectNorm + path.sep) || resolved === projectNorm;
+    const isInReadableRoot = this.readableRoots.some(root =>
+      resolved.startsWith(root + path.sep) || resolved === root
+    );
+
+    if (!isInProject && !isInReadableRoot) {
+      throw new Error(
+        `BLOCKED: Không được đọc file ngoài project directory.\n` +
+        `Path: ${resolved}\nProject: ${projectNorm}`
+      );
+    }
+
+    // Chặn file nhạy cảm — ngay cả trong project dir
+    const basename = path.basename(resolved);
+    const ext = path.extname(resolved).toLowerCase();
+
+    if (SENSITIVE_FILE_PATTERNS.includes(basename)) {
+      throw new Error(`BLOCKED: Không được đọc file ${basename} — chứa secrets.`);
+    }
+    if (SENSITIVE_EXT.includes(ext)) {
+      throw new Error(`BLOCKED: Không được đọc file *${ext} — chứa credentials/keys.`);
+    }
+
     return resolved;
   }
 
@@ -43,14 +90,19 @@ class FileManager {
     const resolved = this._resolvePath(filePath);
     const projectNorm = path.normalize(this.projectDir);
 
-    if (!resolved.startsWith(projectNorm)) {
+    // Dung path.sep de tranh false positive: /app match /app-evil
+    if (!resolved.startsWith(projectNorm + path.sep) && resolved !== projectNorm) {
       throw new Error(`BLOCKED: Không được ghi file ngoài project directory.\nPath: ${resolved}\nProject: ${projectNorm}`);
     }
 
-    // Chặn ghi vào file nhạy cảm
+    // Chặn ghi vào file nhạy cảm — dong bo voi SENSITIVE_FILE_PATTERNS
     const basename = path.basename(resolved);
-    if (['.env', '.env.local', '.env.production'].includes(basename)) {
+    const ext = path.extname(resolved).toLowerCase();
+    if (SENSITIVE_FILE_PATTERNS.includes(basename)) {
       throw new Error(`BLOCKED: Không được ghi file ${basename} — chứa secrets.`);
+    }
+    if (SENSITIVE_EXT.includes(ext)) {
+      throw new Error(`BLOCKED: Không được ghi file *${ext} — chứa credentials/keys.`);
     }
 
     return resolved;
@@ -61,7 +113,12 @@ class FileManager {
   // =============================================
 
   async readFile({ path: filePath, offset = 0, limit = 200 }) {
-    const resolved = this._resolvePath(filePath);
+    let resolved;
+    try {
+      resolved = this._validateReadPath(filePath);
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
 
     if (!fs.existsSync(resolved)) {
       return { success: false, error: `File không tồn tại: ${filePath}` };
@@ -109,6 +166,9 @@ class FileManager {
       return { success: false, error: e.message };
     }
 
+    // Shadow snapshot SAU validation — tranh tao stash cho request bi reject
+    await this.shadowGit.ensureSnapshot('pre-ai-write');
+
     // Tạo thư mục cha nếu chưa có
     const dir = path.dirname(resolved);
     if (!fs.existsSync(dir)) {
@@ -142,6 +202,9 @@ class FileManager {
     if (!fs.existsSync(resolved)) {
       return { success: false, error: `File không tồn tại: ${filePath}` };
     }
+
+    // Shadow snapshot SAU validation + existence check — tranh stash spam
+    await this.shadowGit.ensureSnapshot('pre-ai-edit');
 
     let content = fs.readFileSync(resolved, 'utf-8');
 
@@ -191,7 +254,12 @@ class FileManager {
   // =============================================
 
   async listFiles({ path: dirPath = '.', pattern = '*', max_depth = 3 }) {
-    const resolved = this._resolvePath(dirPath);
+    let resolved;
+    try {
+      resolved = this._validateReadPath(dirPath);
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
 
     if (!fs.existsSync(resolved)) {
       return { success: false, error: `Thư mục không tồn tại: ${dirPath}` };
@@ -227,7 +295,12 @@ class FileManager {
   // =============================================
 
   async searchFiles({ pattern, path: searchPath = '.', include, max_results = 20 }) {
-    const resolved = this._resolvePath(searchPath);
+    let resolved;
+    try {
+      resolved = this._validateReadPath(searchPath);
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
     const results = [];
 
     // Dùng fast-glob để lấy danh sách files

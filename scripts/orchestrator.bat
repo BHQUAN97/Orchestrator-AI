@@ -21,11 +21,13 @@ echo  [0] Status check
 echo  [A] Cost Analytics (browser)
 echo  [C] Setup Roo Code (all projects)
 echo  [R] Restart LiteLLM (after config change)
+echo  [T] Tunnel — Start/Stop Cloudflare Tunnel
+echo  [G] Gateway Portal (browser)
 echo  [Q] Quit
 echo.
 echo ==========================================
 
-set /p choice="Chon [0-9/A/C/R/Q]: "
+set /p choice="Chon [0-9/A/C/R/T/G/Q]: "
 
 if /i "%choice%"=="1" goto start_all
 if /i "%choice%"=="2" goto stop_all
@@ -40,6 +42,8 @@ if /i "%choice%"=="0" goto status
 if /i "%choice%"=="A" goto open_analytics
 if /i "%choice%"=="C" goto setup_roocode
 if /i "%choice%"=="R" goto restart_litellm
+if /i "%choice%"=="T" goto toggle_tunnel
+if /i "%choice%"=="G" goto open_gateway
 if /i "%choice%"=="Q" goto quit
 goto menu
 
@@ -72,7 +76,7 @@ echo.
 echo Testing models through LiteLLM proxy...
 echo.
 
-set PROXY=http://localhost:4001
+set PROXY=http://localhost:5002
 set KEY=sk-master-change-me
 
 echo [1] default (Kimi K2.5)...
@@ -135,38 +139,49 @@ docker logs litellm-proxy --tail 50 -f
 goto menu
 
 :open_dashboard
-start http://localhost:9080
+start http://localhost:5004
 goto menu
 
 :open_litellm
-start http://localhost:4001/ui
+start http://localhost:5002/ui
 goto menu
 
 :open_hermes
-start http://localhost:3000
+start http://localhost:5000
 goto menu
 
 :status
 echo.
 echo === Docker Containers ===
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>nul | findstr /i "litellm hermes orch trust"
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>nul | findstr /i "litellm hermes orch trust gateway auth tunnel"
 echo.
 echo === LiteLLM Health ===
-curl -s http://localhost:4001/health -H "Authorization: Bearer sk-master-change-me" 2>nul | findstr "healthy_count"
+curl -s http://localhost:5002/health -H "Authorization: Bearer sk-master-change-me" 2>nul | findstr "healthy_count"
 echo.
 echo === API Keys ===
 findstr /R "API_KEY=" E:\DEVELOP\ai-orchestrator\.env | findstr /V "^#" | findstr /V "MASTER"
 echo.
-echo === Ports ===
-echo  Dashboard:  http://localhost:9080
-echo  LiteLLM:    http://localhost:4001/ui
-echo  Hermes:     http://localhost:3000
+echo === Local Ports ===
+echo  Gateway Portal:   http://localhost:5005
+echo  Hermes Brain:     http://localhost:5000
+echo  WebUI:            http://localhost:5001
+echo  LiteLLM:          http://localhost:5002/ui
+echo  Orchestrator API: http://localhost:5003
+echo  Analytics:        http://localhost:5004
+echo.
+echo === Tunnel ===
+docker ps --format "{{.Status}}" 2>nul | findstr /i "tunnel" >nul 2>&1
+if not errorlevel 1 (
+    echo  Tunnel: RUNNING — https://ai.remoteterminal.online
+) else (
+    echo  Tunnel: STOPPED
+)
 echo.
 pause
 goto menu
 
 :open_analytics
-start http://localhost:9081
+start http://localhost:5004
 goto menu
 
 :setup_roocode
@@ -184,6 +199,27 @@ echo Waiting 15s...
 timeout /t 15 /nobreak >nul
 echo Done.
 pause
+goto menu
+
+:toggle_tunnel
+echo.
+cd /d E:\DEVELOP\ai-orchestrator
+docker ps --format "{{.Names}}" 2>nul | findstr "orcai-tunnel" >nul 2>&1
+if not errorlevel 1 (
+    echo Tunnel dang chay. Dung tunnel...
+    docker compose --profile tunnel stop tunnel
+    echo Done.
+) else (
+    echo Khoi dong tunnel...
+    docker compose --profile tunnel up -d tunnel
+    timeout /t 5 /nobreak >nul
+    echo Done. Check: https://ai.remoteterminal.online
+)
+pause
+goto menu
+
+:open_gateway
+start http://localhost:5005
 goto menu
 
 :quit

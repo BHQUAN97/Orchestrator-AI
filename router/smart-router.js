@@ -13,6 +13,8 @@
 // === Model Profiles ===
 // Moi model co strengths rieng — router match task voi strengths
 
+const { SLMClassifier } = require('./slm-classifier');
+
 const MODEL_PROFILES = {
   // === v2 lineup (2026-04-16) ===
 
@@ -392,6 +394,117 @@ class SmartRouter {
     return result;
   }
 
+  /**
+   * SLM-powered routing — dung AI phan loai intent thay vi heuristic
+   * Goi model nho/re de classify → chon model phu hop
+   * Fallback ve heuristic route() neu SLM fail
+   *
+   * @param {Object} params - { task, files, prompt, project, contextSize }
+   * @returns {Object} - Same format as route() + slm_classification
+   */
+  async slmRoute({ task = '', files = [], prompt = '', project = '', contextSize = 0 }) {
+    // Lazy init SLM classifier
+    if (!this.slmClassifier) {
+      this.slmClassifier = new SLMClassifier({
+        litellmUrl: this.litellmUrl || process.env.LITELLM_URL,
+        litellmKey: this.litellmKey || process.env.LITELLM_KEY
+      });
+    }
+
+    // Goi SLM classify — wrap trong try-catch de dam bao fallback
+    let classification;
+    try {
+      classification = await this.slmClassifier.classify({ task, files, prompt, project });
+    } catch {
+      classification = null;
+    }
+
+    // SLM fail hoac thieu fields → fallback ve heuristic
+    if (!classification || !classification.model_tier || !classification.intent) {
+      const result = this.route({ task, files, prompt, project, contextSize });
+      result.routing_method = 'heuristic_fallback';
+      if (classification) result.slm_classification = classification;
+      return result;
+    }
+
+    // SLM thanh cong → dung classification de chon model
+    const modelTier = classification.model_tier;
+
+    // Tim model trong profiles theo litellm_name (tier)
+    let selectedModel = null;
+    for (const [modelName, profile] of Object.entries(this.models)) {
+      if (!this.availableModels.includes(modelName)) continue;
+      if (profile.litellm_name === modelTier) {
+        selectedModel = modelName;
+        break;
+      }
+    }
+
+    // Neu khong tim thay model cho tier → fallback
+    if (!selectedModel) {
+      const result = this.route({ task, files, prompt, project, contextSize });
+      result.routing_method = 'heuristic_fallback';
+      result.slm_classification = classification;
+      return result;
+    }
+
+    const profile = this.models[selectedModel];
+
+    // Context size check — neu model khong du context, escalate
+    if (contextSize > 0 && contextSize > profile.max_context * 0.8) {
+      // Tim model co context lon hon
+      const largerModel = Object.entries(this.models)
+        .filter(([name]) => this.availableModels.includes(name))
+        .filter(([, p]) => p.max_context >= contextSize * 1.2)
+        .sort((a, b) => a[1].cost_per_1m_input - b[1].cost_per_1m_input)[0];
+
+      if (largerModel) {
+        selectedModel = largerModel[0];
+      }
+    }
+
+    // Chay heuristic song song de so sanh (cho analytics)
+    const heuristicResult = this.route({ task, files, prompt, project, contextSize });
+
+    const result = {
+      model: selectedModel,
+      litellm_name: this.models[selectedModel].litellm_name,
+      score: Math.round(classification.confidence * 100),
+      reasons: [
+        `SLM: ${classification.intent}/${classification.complexity}/${classification.domain}`,
+        classification.reasoning
+      ],
+      description: this.models[selectedModel].description,
+      cost: this.models[selectedModel].cost_per_1m_input,
+      alternatives: [{
+        model: heuristicResult.model,
+        litellm_name: heuristicResult.litellm_name,
+        score: heuristicResult.score,
+        reasons: ['heuristic alternative', ...heuristicResult.reasons]
+      }],
+      analysis: {
+        task,
+        domains: [classification.domain],
+        keywords: [],
+        files_count: files.length,
+        context_size: contextSize
+      },
+      // Extra info
+      routing_method: 'slm',
+      slm_classification: classification,
+      heuristic_would_choose: heuristicResult.model,
+      agreement: selectedModel === heuristicResult.model
+    };
+
+    // Log
+    this.history.push({
+      timestamp: new Date().toISOString(),
+      ...result
+    });
+
+    return result;
+  }
+
   // Lay lich su routing
   getHistory(limit = 20) {
     return this.history.slice(-limit);
@@ -412,4 +525,4 @@ class SmartRouter {
   }
 }
 
-module.exports = { SmartRouter, MODEL_PROFILES, detectDomainFromPath, detectKeywordsFromPrompt };
+module.exports = { SmartRouter, MODEL_PROFILES, detectDomainFromPath, detectKeywordsFromPrompt, SLMClassifier };
