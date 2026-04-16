@@ -1,0 +1,26 @@
+# Orchestrator scan ignore list
+# Cac folder/file bi bo qua khi Scanner quet project
+
+# Build artifacts
+dist
+build
+.next
+out
+
+# Dependencies
+node_modules
+.pnpm-store
+
+# Cache
+.cache
+.turbo
+.swc
+coverage
+
+# IDE
+.idea
+.vscode
+
+# Data/logs (orchestrator internal)
+data
+logs

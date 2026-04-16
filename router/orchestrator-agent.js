@@ -43,8 +43,8 @@ const AGENT_ROLE_MAP = {
   'be-dev':     'default',   // DeepSeek V3.2 — full-stack code gen
   'reviewer':   'fast',      // Gemini 3 Flash — scan nhanh, re
   'debugger':   'smart',     // Claude Sonnet 4.6 — trace sau
-  'scanner':    'cheap',     // GPT-5.4 Mini — quet project, doc file, thu thap context
-  'docs':       'cheap',     // GPT-5.4 Mini — text generation
+  'scanner':    'cheap',     // GPT-5.4 Mini — quet project, doc file. Set 'local' cho offline mode
+  'docs':       'cheap',     // GPT-5.4 Mini — text generation. Set 'local' cho offline mode
   'builder':    'default',   // DeepSeek V3.2 — general code
   'dispatcher': 'fast'       // Gemini 3 Flash — synthesize ket qua
 };
@@ -163,7 +163,8 @@ class OrchestratorAgent {
     // Core modules
     this.smartRouter = new SmartRouter({
       availableModels: options.availableModels || ['opus-4.6', 'sonnet-4.6', 'deepseek-v3.2', 'gemini-3-flash', 'gpt-5.4-mini'],
-      costOptimize: true
+      costOptimize: true,
+      preferLocal: options.preferLocal || false
     });
 
     this.decisionLock = new DecisionLock({ projectDir: this.projectDir });
@@ -194,6 +195,10 @@ class OrchestratorAgent {
       maxTraces: options.maxTraces || 100,
       logDir: options.traceLogDir || require('path').join(this.projectDir, 'data', 'traces')
     });
+
+    // Scan data cache — tranh doc disk lap lai trong 5 phut
+    this._scanCache = { data: null, key: null, expiry: 0 };
+    this._scanCacheTTL = options.scanCacheTTL || 5 * 60 * 1000; // 5 phut
   }
 
   // =============================================
@@ -279,6 +284,13 @@ class OrchestratorAgent {
    * Scanner (cheap) khong co tools → can doc truoc roi dua vao
    */
   async _collectProjectData(hintFiles = []) {
+    // Cache key = sorted hint files list
+    const cacheKey = hintFiles.slice().sort().join('|');
+    if (this._scanCache.key === cacheKey && Date.now() < this._scanCache.expiry) {
+      console.log('📦 Scan cache hit (TTL 5min)');
+      return this._scanCache.data;
+    }
+
     const fs = require('fs');
     const path = require('path');
     const parts = [];
@@ -321,7 +333,39 @@ class OrchestratorAgent {
       } catch { /* ignore */ }
     }
 
-    return parts.join('\n') || 'Khong doc duoc du lieu project';
+    const result = parts.join('\n') || 'Khong doc duoc du lieu project';
+
+    // Luu vao cache
+    this._scanCache = { data: result, key: cacheKey, expiry: Date.now() + this._scanCacheTTL };
+
+    return result;
+  }
+
+  /**
+   * Load .orchignore — danh sach thu muc/file bo qua khi scan
+   * Format giong .gitignore: 1 pattern/dong, # la comment
+   */
+  _loadOrchIgnore() {
+    if (this._orchIgnorePatterns) return this._orchIgnorePatterns;
+
+    const fs = require('fs');
+    const path = require('path');
+    const ignorePath = path.join(this.projectDir, '.orchignore');
+
+    try {
+      if (fs.existsSync(ignorePath)) {
+        const content = fs.readFileSync(ignorePath, 'utf8');
+        this._orchIgnorePatterns = content.split('\n')
+          .map(l => l.trim())
+          .filter(l => l && !l.startsWith('#'));
+      } else {
+        this._orchIgnorePatterns = [];
+      }
+    } catch {
+      this._orchIgnorePatterns = [];
+    }
+
+    return this._orchIgnorePatterns;
   }
 
   /**
@@ -332,7 +376,7 @@ class OrchestratorAgent {
     const path = require('path');
     if (depth > maxDepth || entries.count > maxEntries) return '';
 
-    const SKIP = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.cache', 'coverage'];
+    const SKIP = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.cache', 'coverage', ...this._loadOrchIgnore()];
     const lines = [];
 
     try {
