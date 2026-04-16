@@ -1,0 +1,96 @@
+# ============================================
+# LiteLLM Proxy Config — Multi-Model Gateway
+# Co: Gemini key + OpenRouter key (200+ models)
+# ============================================
+
+model_list:
+  # ★ default: Kimi K2.5 qua OpenRouter
+  - model_name: "default"
+    litellm_params:
+      model: "openai/moonshotai/kimi-k2.5"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # smart: Claude Sonnet 4 qua OpenRouter
+  - model_name: "smart"
+    litellm_params:
+      model: "openai/anthropic/claude-sonnet-4"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # fast: Gemini truc tiep (free key)
+  - model_name: "fast"
+    litellm_params:
+      model: "gemini/gemini-2.5-flash"
+      api_key: "os.environ/GEMINI_API_KEY"
+      rpm: 60
+
+  # fast fallback: Gemini qua OpenRouter
+  - model_name: "fast"
+    litellm_params:
+      model: "openai/google/gemini-2.5-flash"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # cheap: DeepSeek qua OpenRouter
+  - model_name: "cheap"
+    litellm_params:
+      model: "openai/deepseek/deepseek-chat-v3-0324"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # --- Goi truc tiep tung model ---
+  - model_name: "kimi"
+    litellm_params:
+      model: "openai/moonshotai/kimi-k2.5"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  - model_name: "deepseek"
+    litellm_params:
+      model: "openai/deepseek/deepseek-chat-v3-0324"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  - model_name: "gemini"
+    litellm_params:
+      model: "gemini/gemini-2.5-flash"
+      api_key: "os.environ/GEMINI_API_KEY"
+      rpm: 60
+
+  - model_name: "sonnet"
+    litellm_params:
+      model: "openai/anthropic/claude-sonnet-4"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+# Router
+router_settings:
+  routing_strategy: "usage-based-routing-v2"
+  enable_pre_call_checks: true
+  allowed_fails: 3
+  cooldown_time: 60
+  num_retries: 2
+  retry_after: 5
+
+# Budget
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"
+  max_budget: 5.0
+  budget_duration: "1d"
+
+# Cache
+litellm_settings:
+  cache: true
+  cache_params:
+    type: "local"
+    ttl: 300
+  success_callback: ["db"]
+  failure_callback: ["db"]

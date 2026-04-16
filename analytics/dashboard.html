@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Orchestrator — Phân tích chi phí</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+      --text: #e4e4e7; --dim: #9ca3af; --accent: #6366f1;
+      --green: #22c55e; --yellow: #eab308; --red: #ef4444; --blue: #3b82f6;
+      --font-base: 14px;
+    }
+    body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: var(--font-base); line-height: 1.5; }
+
+    /* Header */
+    .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+    .header h1 { font-size: 18px; font-weight: 700; } .header h1 span { color: var(--accent); }
+
+    /* Nav */
+    .nav { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; }
+    .nav button { background: none; border: none; color: var(--dim); padding: 12px 18px; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .nav button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .nav button:hover { color: var(--text); }
+
+    /* Layout */
+    .main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 24px; }
+
+    /* Cards */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .card-label { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600; }
+    .card-value { font-size: 28px; font-weight: 800; }
+    .card-sub { font-size: 13px; color: var(--dim); margin-top: 6px; }
+    .green { color: var(--green); } .yellow { color: var(--yellow); } .red { color: var(--red); } .blue { color: var(--blue); }
+
+    /* Tables */
+    .tbl { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
+    .tbl-head { padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 10px 18px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1px solid var(--border); font-weight: 600; }
+    td { padding: 12px 18px; font-size: 14px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(99,102,241,0.05); }
+
+    /* Bar chart */
+    .bar-chart { padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; }
+    .bar-wrap { display: flex; gap: 10px; align-items: center; }
+    .bar-label { width: 70px; font-size: 13px; color: var(--dim); text-align: right; }
+    .bar-track { flex: 1; height: 26px; background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 8px; font-size: 12px; font-weight: 600; color: white; min-width: 4px; }
+
+    /* Savings */
+    .savings-box { background: linear-gradient(135deg, #0f2a1a, #0f1a2a); border: 1px solid #1a4a2a; border-radius: 14px; padding: 28px; margin-bottom: 24px; text-align: center; }
+    .savings-value { font-size: 42px; font-weight: 900; color: var(--green); }
+    .savings-sub { font-size: 15px; color: var(--dim); margin-top: 8px; }
+
+    /* Pills */
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; margin: 1px 2px; }
+    .pill-green { background: rgba(34,197,94,0.15); color: var(--green); }
+    .pill-blue { background: rgba(59,130,246,0.15); color: var(--blue); }
+    .pill-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .pill-purple { background: rgba(99,102,241,0.15); color: var(--accent); }
+
+    /* Controls */
+    select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 8px; font-size: 14px; }
+
+    /* Tabs */
+    .tab { display: none; } .tab.active { display: block; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+      .card-value { font-size: 22px; }
+      td, th { padding: 8px 12px; font-size: 13px; }
+      .header h1 { font-size: 16px; }
+      table { display: block; overflow-x: auto; }
+    }
+    @media (max-width: 480px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1><span>$</span> Phân tích chi phí</h1>
+    <select id="period" onchange="refresh()">
+      <option value="today">Hôm nay</option>
+      <option value="7d" selected>7 ngày</option>
+      <option value="30d">30 ngày</option>
+      <option value="all">Tất cả</option>
+    </select>
+  </div>
+
+  <div class="nav">
+    <button class="active" onclick="showTab('overview',this)">Tổng quan</button>
+    <button onclick="showTab('models',this)">Theo Model</button>
+    <button onclick="showTab('projects',this)">Theo Project</button>
+    <button onclick="showTab('commands',this)">Theo Command</button>
+    <button onclick="showTab('sessions',this)">Theo Phiên</button>
+    <button onclick="showTab('trend',this)">Xu hướng</button>
+    <button onclick="showTab('savings',this)">Tiết kiệm</button>
+  </div>
+
+  <div class="main">
+
+    <!-- Tổng quan -->
+    <div id="tab-overview" class="tab active">
+      <div class="grid" id="summary-cards"></div>
+      <div class="tbl">
+        <div class="tbl-head">Chi phí theo Model</div>
+        <table>
+          <thead><tr>
+            <th>Model</th><th>Số lần</th>
+            <th>Token nhập</th><th>Token xuất</th>
+            <th>Phí nhập</th><th>Phí xuất</th><th>Tổng</th>
+          </tr></thead>
+          <tbody id="overview-models"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Theo Model -->
+    <div id="tab-models" class="tab">
+      <div class="tbl">
+        <div class="tbl-head">Chi tiết theo Model</div>
+        <table>
+          <thead><tr>
+            <th>Model</th><th>Số lần</th>
+            <th>Token nhập</th><th>Token xuất</th>
+            <th>Phí nhập</th><th>Phí xuất</th><th>Tổng</th><th>Độ trễ</th>
+          </tr></thead>
+          <tbody id="models-table"></tbody>
+        </table>
+      </div>
+      <div class="tbl">
+        <div class="tbl-head">Biểu đồ chi phí</div>
+        <div class="bar-chart" id="models-chart"></div>
+      </div>
+    </div>
+
+    <!-- Theo Project -->
+    <div id="tab-projects" class="tab">
+      <div class="tbl">
+        <div class="tbl-head">Chi phí theo Dự án</div>
+        <table>
+          <thead><tr>
+            <th>Dự án</th><th>Số lần</th>
+            <th>Token nhập</th><th>Token xuất</th>
+            <th>Phí nhập</th><th>Phí xuất</th><th>Tổng</th><th>Model đã dùng</th>
+          </tr></thead>
+          <tbody id="projects-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Theo Command -->
+    <div id="tab-commands" class="tab">
+      <div class="tbl">
+        <div class="tbl-head">Chi phí theo Lệnh</div>
+        <table>
+          <thead><tr>
+            <th>Lệnh</th><th>Số lần</th>
+            <th>Token</th><th>Tổng phí</th><th>Trung bình/lần</th><th>Dự án</th>
+          </tr></thead>
+          <tbody id="commands-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Theo Phiên -->
+    <div id="tab-sessions" class="tab">
+      <div class="tbl">
+        <div class="tbl-head">Các phiên làm việc gần đây</div>
+        <table>
+          <thead><tr>
+            <th>Phiên</th><th>Dự án</th><th>Thời lượng</th>
+            <th>Số lần</th><th>Chi phí</th><th>Lệnh đã dùng</th>
+          </tr></thead>
+          <tbody id="sessions-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Xu hướng -->
+    <div id="tab-trend" class="tab">
+      <div class="tbl">
+        <div class="tbl-head">Chi phí theo ngày</div>
+        <div class="bar-chart" id="daily-chart"></div>
+      </div>
+      <div class="tbl">
+        <div class="tbl-head">Chi phí theo tháng</div>
+        <table>
+          <thead><tr><th>Tháng</th><th>Số lần</th><th>Token</th><th>Chi phí</th></tr></thead>
+          <tbody id="monthly-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tiết kiệm -->
+    <div id="tab-savings" class="tab">
+      <div class="savings-box">
+        <div class="card-label">Đã tiết kiệm (so với dùng Opus cho tất cả)</div>
+        <div class="savings-value" id="savings-amount">$0.00</div>
+        <div class="savings-sub" id="savings-detail"></div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="card-label">Chi phí thực tế</div>
+          <div class="card-value green" id="actual-cost">$0</div>
+          <div class="card-sub">Multi-model routing</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Nếu dùng Opus</div>
+          <div class="card-value red" id="opus-cost">$0</div>
+          <div class="card-sub">$15 input + $75 output / 1M tokens</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Phần trăm tiết kiệm</div>
+          <div class="card-value blue" id="savings-pct">0%</div>
+          <div class="card-sub">Nhờ chọn model phù hợp</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const API = 'http://localhost:9081';
+
+    function showTab(tab, btn) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      if (btn) btn.classList.add('active');
+    }
+
+    async function refresh() {
+      const period = document.getElementById('period').value;
+      try {
+        const [summary, models, projects, commands, sessions, daily, monthly, comparison] = await Promise.all([
+          ft(`${API}/analytics/summary`),
+          ft(`${API}/analytics/models?period=${period}`),
+          ft(`${API}/analytics/projects?period=${period}`),
+          ft(`${API}/analytics/commands?period=${period}`),
+          ft(`${API}/analytics/sessions?period=${period}`),
+          ft(`${API}/analytics/daily?days=30`),
+          ft(`${API}/analytics/monthly`),
+          ft(`${API}/analytics/comparison?period=${period}`),
+        ]);
+        renderSummary(summary);
+        renderModels(models);
+        renderProjects(projects);
+        renderCommands(commands);
+        renderSessions(sessions);
+        renderDaily(daily);
+        renderMonthly(monthly);
+        renderSavings(comparison);
+      } catch (e) {
+        document.getElementById('summary-cards').innerHTML = `
+          <div class="card"><div class="card-label">Trạng thái</div>
+          <div class="card-value red">Không kết nối</div>
+          <div class="card-sub">Chạy: node analytics/api-server.js hoặc docker compose up -d analytics</div></div>`;
+      }
+    }
+
+    async function ft(url) { return (await fetch(url)).json(); }
+
+    function renderSummary(s) {
+      const d = s.today || {};
+      const w = s.week || {};
+      const m = s.month || {};
+      document.getElementById('summary-cards').innerHTML = `
+        <div class="card">
+          <div class="card-label">Hôm nay</div>
+          <div class="card-value ${d.total_cost > 3 ? 'red' : d.total_cost > 1 ? 'yellow' : 'green'}">$${$(d.total_cost)}</div>
+          <div class="card-sub">Nhập: $${$(d.cost_in)} | Xuất: $${$(d.cost_out)}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">7 ngày</div>
+          <div class="card-value blue">$${$(w.total_cost)}</div>
+          <div class="card-sub">${w.total_requests||0} lần gọi</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Token nhập</div>
+          <div class="card-value">${fmt(d.tokens_in)}</div>
+          <div class="card-sub">Cache: ${fmt(d.tokens_cached)} | Suy luận: ${fmt(d.tokens_reasoning)}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Token xuất</div>
+          <div class="card-value">${fmt(d.tokens_out)}</div>
+          <div class="card-sub">${d.total_requests||0} lần gọi | ${d.cache_hits||0} cache</div>
+        </div>`;
+    }
+
+    function renderModels(models) {
+      const maxCost = Math.max(...models.map(m => m.cost), 0.001);
+      const colors = ['#6366f1', '#3b82f6', '#22c55e', '#eab308', '#ef4444'];
+
+      document.getElementById('models-table').innerHTML = models.map(m =>
+        `<tr><td><strong>${m.model}</strong></td><td>${m.requests}</td>
+         <td>${fmt(m.tokens_in)}</td><td>${fmt(m.tokens_out)}</td>
+         <td>$${$(m.cost_in)}</td><td>$${$(m.cost_out)}</td>
+         <td><strong>$${$(m.cost)}</strong></td><td>${m.avg_latency}ms</td></tr>`
+      ).join('');
+
+      document.getElementById('overview-models').innerHTML = models.map(m =>
+        `<tr><td><strong>${m.model}</strong></td><td>${m.requests}</td>
+         <td>${fmt(m.tokens_in)}</td><td>${fmt(m.tokens_out)}</td>
+         <td>$${$(m.cost_in)}</td><td>$${$(m.cost_out)}</td>
+         <td><strong>$${$(m.cost)}</strong></td></tr>`
+      ).join('');
+
+      document.getElementById('models-chart').innerHTML = models.map((m, i) =>
+        `<div class="bar-wrap"><span class="bar-label">${m.model}</span>
+         <div class="bar-track"><div class="bar-fill" style="width:${Math.max(m.cost/maxCost*100,4)}%;background:${colors[i%5]}">
+         $${$(m.cost)} (${m.requests} lần)</div></div></div>`
+      ).join('');
+    }
+
+    function renderProjects(projects) {
+      document.getElementById('projects-table').innerHTML = projects.map(p =>
+        `<tr><td><strong>${p.project}</strong></td><td>${p.requests}</td>
+         <td>${fmt(p.tokens_in)}</td><td>${fmt(p.tokens_out)}</td>
+         <td>$${$(p.cost_in)}</td><td>$${$(p.cost_out)}</td>
+         <td><strong>$${$(p.cost)}</strong></td>
+         <td>${p.models_used.map(m => `<span class="pill pill-blue">${m}</span>`).join(' ')}</td></tr>`
+      ).join('');
+    }
+
+    function renderCommands(commands) {
+      document.getElementById('commands-table').innerHTML = commands.map(c =>
+        `<tr><td><strong>${c.command}</strong></td><td>${c.requests}</td>
+         <td>${fmt(c.tokens)}</td><td>$${$(c.cost)}</td>
+         <td>$${$(c.avg_cost)}</td>
+         <td>${c.projects.map(p => `<span class="pill pill-purple">${p}</span>`).join(' ')}</td></tr>`
+      ).join('');
+    }
+
+    function renderSessions(sessions) {
+      document.getElementById('sessions-table').innerHTML = sessions.slice(0, 20).map(s =>
+        `<tr><td>${s.session.length > 14 ? s.session.slice(0,14)+'...' : s.session}</td>
+         <td>${s.project}</td><td>${s.duration_min} phút</td>
+         <td>${s.requests}</td><td>$${$(s.cost)}</td>
+         <td>${s.commands.map(c => `<span class="pill pill-green">${c}</span>`).join(' ')}</td></tr>`
+      ).join('');
+    }
+
+    function renderDaily(daily) {
+      const maxCost = Math.max(...daily.map(d => d.cost), 0.001);
+      const active = daily.filter(d => d.requests > 0);
+      document.getElementById('daily-chart').innerHTML = active.length > 0
+        ? active.map(d =>
+          `<div class="bar-wrap"><span class="bar-label">${d.date.slice(5)}</span>
+           <div class="bar-track"><div class="bar-fill" style="width:${Math.max(d.cost/maxCost*100,4)}%;background:var(--accent)">
+           $${$(d.cost)} — ${d.requests} lần</div></div></div>`
+        ).join('')
+        : '<div style="padding:20px;color:var(--dim);font-size:14px">Chưa có dữ liệu. Gửi request qua Analytics proxy (cổng 9081) để bắt đầu theo dõi.</div>';
+    }
+
+    function renderMonthly(monthly) {
+      document.getElementById('monthly-table').innerHTML = monthly.map(m =>
+        `<tr><td>${m.month}</td><td>${m.requests}</td><td>${fmt(m.tokens)}</td><td>$${$(m.cost)}</td></tr>`
+      ).join('');
+    }
+
+    function renderSavings(comp) {
+      document.getElementById('savings-amount').textContent = `$${comp.saved.toFixed(2)}`;
+      document.getElementById('savings-detail').textContent =
+        `Thực tế: $${$(comp.actual_cost)} — Nếu Opus: $${$(comp.opus_equivalent)}`;
+      document.getElementById('actual-cost').textContent = `$${$(comp.actual_cost)}`;
+      document.getElementById('opus-cost').textContent = `$${$(comp.opus_equivalent)}`;
+      document.getElementById('savings-pct').textContent = `${comp.saved_percent}%`;
+    }
+
+    function $(n) { return (n||0).toFixed(4); }
+    function fmt(n) {
+      n = n || 0;
+      if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+      return n.toString();
+    }
+
+    refresh();
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>

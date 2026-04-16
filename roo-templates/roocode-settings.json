@@ -1,0 +1,45 @@
+{
+  "rooCode.apiConfigurations": {
+    "profiles": {
+      "reasoning": {
+        "provider": "litellm",
+        "litellmBaseUrl": "http://localhost:4001",
+        "litellmApiKey": "your-litellm-master-key",
+        "litellmModelId": "smart",
+        "displayName": "Sonnet 4 (Smart)"
+      },
+      "coding": {
+        "provider": "litellm",
+        "litellmBaseUrl": "http://localhost:4001",
+        "litellmApiKey": "your-litellm-master-key",
+        "litellmModelId": "default",
+        "displayName": "Kimi K2.5 (Default)"
+      },
+      "review": {
+        "provider": "litellm",
+        "litellmBaseUrl": "http://localhost:4001",
+        "litellmApiKey": "your-litellm-master-key",
+        "litellmModelId": "fast",
+        "displayName": "Gemini Flash (Fast)"
+      },
+      "cheap": {
+        "provider": "litellm",
+        "litellmBaseUrl": "http://localhost:4001",
+        "litellmApiKey": "your-litellm-master-key",
+        "litellmModelId": "cheap",
+        "displayName": "DeepSeek (Cheap)"
+      }
+    },
+    "modeProfiles": {
+      "spec": "reasoning",
+      "architect": "reasoning",
+      "build": "coding",
+      "code": "coding",
+      "review": "review",
+      "debug": "reasoning",
+      "docs": "cheap",
+      "seed": "cheap",
+      "ask": "cheap"
+    }
+  }
+}

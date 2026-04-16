@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Orchestrator — Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e4e4e7;
+      --text-dim: #8b8d98;
+      --accent: #6366f1;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --red: #ef4444;
+      --blue: #3b82f6;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .header h1 span { color: var(--accent); }
+
+    .status-badges {
+      display: flex;
+      gap: 8px;
+    }
+
+    .badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .badge.online { background: rgba(34,197,94,0.15); color: var(--green); }
+    .badge.offline { background: rgba(239,68,68,0.15); color: var(--red); }
+    .badge.warning { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+    /* Navigation */
+    .nav {
+      display: flex;
+      gap: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+
+    .nav button {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      padding: 12px 20px;
+      cursor: pointer;
+      font-size: 13px;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+    }
+
+    .nav button.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .nav button:hover { color: var(--text); }
+
+    /* Main content */
+    .main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+
+    /* Cards */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .card-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .card-value {
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .card-sub {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .card-value.green { color: var(--green); }
+    .card-value.yellow { color: var(--yellow); }
+    .card-value.red { color: var(--red); }
+    .card-value.blue { color: var(--blue); }
+
+    /* Table */
+    .table-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .table-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .table-title { font-size: 14px; font-weight: 600; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      text-align: left;
+      padding: 10px 20px;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 12px 20px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    /* Bar chart */
+    .bar-chart {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px 20px;
+    }
+
+    .bar-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .bar-label {
+      width: 80px;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-align: right;
+    }
+
+    .bar-track {
+      flex: 1;
+      height: 24px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      padding-left: 8px;
+      font-size: 11px;
+      font-weight: 500;
+      color: white;
+      transition: width 0.5s ease;
+    }
+
+    /* Settings form */
+    .settings-section {
+      margin-bottom: 24px;
+    }
+
+    .settings-section h3 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: var(--text);
+    }
+
+    .form-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      width: 180px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .form-group input, .form-group select {
+      flex: 1;
+      max-width: 400px;
+      padding: 8px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .form-group input:focus, .form-group select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .form-group .hint {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .btn {
+      padding: 8px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-outline { background: none; border: 1px solid var(--border); color: var(--text); }
+
+    /* Quick links */
+    .quick-links {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .quick-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      transition: border-color 0.2s;
+    }
+
+    .quick-link:hover { border-color: var(--accent); }
+
+    /* Tabs content */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Mobile responsive */
+    @media (max-width: 600px) {
+      .grid { grid-template-columns: 1fr; }
+      .form-group { flex-direction: column; align-items: flex-start; }
+      .form-group label { width: auto; }
+      .form-group input, .form-group select { max-width: 100%; width: 100%; }
+      .header h1 { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1><span>AI</span> Orchestrator</h1>
+    <div class="status-badges">
+      <span class="badge" id="badge-litellm">LiteLLM</span>
+      <span class="badge" id="badge-hermes">Hermes</span>
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <div class="nav">
+    <button class="active" onclick="showTab('overview')">Overview</button>
+    <button onclick="showTab('usage')">Usage & Cost</button>
+    <button onclick="showTab('models')">Models</button>
+    <button onclick="showTab('settings')">Settings</button>
+    <button onclick="showTab('links')">Quick Links</button>
+  </div>
+
+  <div class="main">
+
+    <!-- === Overview Tab === -->
+    <div id="tab-overview" class="tab-content active">
+      <div class="grid">
+        <div class="card">
+          <div class="card-label">Chi phi hom nay</div>
+          <div class="card-value green" id="cost-today">$0.00</div>
+          <div class="card-sub">Budget: $5.00/ngay</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Chi phi thang nay</div>
+          <div class="card-value blue" id="cost-month">$0.00</div>
+          <div class="card-sub">Budget: $150/thang</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Requests hom nay</div>
+          <div class="card-value" id="requests-today">0</div>
+          <div class="card-sub">Cache hits: <span id="cache-hits">0</span></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Tokens hom nay</div>
+          <div class="card-value" id="tokens-today">0</div>
+          <div class="card-sub">Input: <span id="tokens-in">0</span> | Output: <span id="tokens-out">0</span></div>
+        </div>
+      </div>
+
+      <!-- Per-model breakdown -->
+      <div class="table-card">
+        <div class="table-header">
+          <span class="table-title">Model Breakdown — Hom nay</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Requests</th>
+              <th>Tokens</th>
+              <th>Cost</th>
+              <th>Avg Latency</th>
+            </tr>
+          </thead>
+          <tbody id="model-table">
+            <tr>
+              <td>Kimi K2.5 (default)</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>Sonnet 4 (smart)</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>Gemini Flash (fast)</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>DeepSeek (cheap)</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- === Usage & Cost Tab === -->
+    <div id="tab-usage" class="tab-content">
+      <div class="table-card">
+        <div class="table-header">
+          <span class="table-title">Daily Cost — 7 ngay gan nhat</span>
+          <select id="period-select" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;">
+            <option value="7d">7 ngay</option>
+            <option value="30d">30 ngay</option>
+            <option value="month">Thang nay</option>
+          </select>
+        </div>
+        <div class="bar-chart" id="daily-chart">
+          <!-- Filled by JS -->
+        </div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-header">
+          <span class="table-title">Monthly Summary</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Thang</th>
+              <th>Requests</th>
+              <th>Tokens</th>
+              <th>Cost</th>
+            </tr>
+          </thead>
+          <tbody id="monthly-table">
+            <tr><td>Apr 2026</td><td>—</td><td>—</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- === Models Tab === -->
+    <div id="tab-models" class="tab-content">
+      <div class="table-card">
+        <div class="table-header">
+          <span class="table-title">Model Configuration</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Provider</th>
+              <th>Model</th>
+              <th>Status</th>
+              <th>Price (Input/1M)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>default</strong></td>
+              <td>Moonshot</td>
+              <td>kimi-k2.5</td>
+              <td id="status-kimi"><span class="badge warning">No Key</span></td>
+              <td>$1.00</td>
+            </tr>
+            <tr>
+              <td><strong>smart</strong></td>
+              <td>Anthropic</td>
+              <td>claude-sonnet-4</td>
+              <td id="status-anthropic"><span class="badge warning">No Key</span></td>
+              <td>$3.00</td>
+            </tr>
+            <tr>
+              <td><strong>fast</strong></td>
+              <td>Google</td>
+              <td>gemini-2.5-flash</td>
+              <td id="status-gemini"><span class="badge warning">No Key</span></td>
+              <td>$0.15</td>
+            </tr>
+            <tr>
+              <td><strong>cheap</strong></td>
+              <td>DeepSeek</td>
+              <td>deepseek-chat</td>
+              <td id="status-deepseek"><span class="badge warning">No Key</span></td>
+              <td>$0.27</td>
+            </tr>
+            <tr>
+              <td><strong>fallback</strong></td>
+              <td>OpenRouter</td>
+              <td>auto (200+ models)</td>
+              <td id="status-openrouter"><span class="badge warning">No Key</span></td>
+              <td>varies</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Routing map -->
+      <div class="table-card">
+        <div class="table-header">
+          <span class="table-title">Task → Model Routing</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Command</th><th>Model</th><th>Ly do</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>/spec, /debug</td><td>smart (Sonnet)</td><td>Reasoning sau</td></tr>
+            <tr><td>/build, /task, /fix</td><td>default (Kimi K2.5)</td><td>Code generation</td></tr>
+            <tr><td>/check, /review, /security</td><td>fast (Gemini)</td><td>Scan nhanh, re</td></tr>
+            <tr><td>/cleanup, /docs, /wire</td><td>cheap (DeepSeek)</td><td>Re nhat</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- === Settings Tab === -->
+    <div id="tab-settings" class="tab-content">
+      <div class="card" style="margin-bottom:24px;">
+        <div class="settings-section">
+          <h3>API Keys</h3>
+          <div class="form-group">
+            <label>OpenRouter</label>
+            <input type="password" id="key-openrouter" placeholder="sk-or-v1-...">
+            <span class="hint"><a href="https://openrouter.ai/keys" target="_blank" style="color:var(--accent)">Get key</a></span>
+          </div>
+          <div class="form-group">
+            <label>Kimi / Moonshot</label>
+            <input type="password" id="key-kimi" placeholder="sk-...">
+            <span class="hint"><a href="https://platform.moonshot.cn/console/api-keys" target="_blank" style="color:var(--accent)">Get key</a></span>
+          </div>
+          <div class="form-group">
+            <label>Anthropic (Sonnet)</label>
+            <input type="password" id="key-anthropic" placeholder="sk-ant-...">
+            <span class="hint"><a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--accent)">Get key</a></span>
+          </div>
+          <div class="form-group">
+            <label>Google Gemini</label>
+            <input type="password" id="key-gemini" placeholder="AIza...">
+            <span class="hint"><a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">Get key</a></span>
+          </div>
+          <div class="form-group">
+            <label>DeepSeek</label>
+            <input type="password" id="key-deepseek" placeholder="sk-...">
+            <span class="hint"><a href="https://platform.deepseek.com/api_keys" target="_blank" style="color:var(--accent)">Get key</a></span>
+          </div>
+          <button class="btn btn-primary" onclick="saveKeys()">Save Keys</button>
+          <span id="save-status" style="margin-left:12px;font-size:12px;color:var(--green);"></span>
+        </div>
+
+        <div class="settings-section">
+          <h3>Budget</h3>
+          <div class="form-group">
+            <label>Max per day ($)</label>
+            <input type="number" id="budget-day" value="5" step="0.5">
+          </div>
+          <div class="form-group">
+            <label>Max per month ($)</label>
+            <input type="number" id="budget-month" value="150" step="5">
+          </div>
+          <div class="form-group">
+            <label>Alert at (%)</label>
+            <input type="number" id="budget-alert" value="80" step="5">
+          </div>
+          <button class="btn btn-primary" onclick="saveBudget()">Save Budget</button>
+        </div>
+
+        <div class="settings-section">
+          <h3>LiteLLM Proxy</h3>
+          <div class="form-group">
+            <label>Proxy URL</label>
+            <input type="text" id="proxy-url" value="http://localhost:4001">
+          </div>
+          <div class="form-group">
+            <label>Master Key</label>
+            <input type="password" id="proxy-key" value="sk-master-change-me">
+          </div>
+          <button class="btn btn-primary" onclick="testConnection()">Test Connection</button>
+          <span id="conn-status" style="margin-left:12px;font-size:12px;"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- === Quick Links Tab === -->
+    <div id="tab-links" class="tab-content">
+      <h3 style="margin-bottom:16px;">Services</h3>
+      <div class="quick-links" style="margin-bottom:24px;">
+        <a class="quick-link" href="http://localhost:4001/ui" target="_blank">LiteLLM Dashboard</a>
+        <a class="quick-link" href="http://localhost:3000" target="_blank">Hermes Agent</a>
+        <a class="quick-link" href="http://localhost:3002" target="_blank">Hermes WebUI</a>
+      </div>
+
+      <h3 style="margin-bottom:16px;">API Key Registration</h3>
+      <div class="quick-links" style="margin-bottom:24px;">
+        <a class="quick-link" href="https://openrouter.ai/keys" target="_blank">OpenRouter (1 key, 200+ models)</a>
+        <a class="quick-link" href="https://platform.moonshot.cn/console/api-keys" target="_blank">Kimi / Moonshot</a>
+        <a class="quick-link" href="https://console.anthropic.com/settings/keys" target="_blank">Anthropic</a>
+        <a class="quick-link" href="https://aistudio.google.com/apikey" target="_blank">Google Gemini</a>
+        <a class="quick-link" href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek</a>
+      </div>
+
+      <h3 style="margin-bottom:16px;">Documentation</h3>
+      <div class="quick-links">
+        <a class="quick-link" href="https://docs.litellm.ai/" target="_blank">LiteLLM Docs</a>
+        <a class="quick-link" href="https://hermes-agent.nousresearch.com/" target="_blank">Hermes Docs</a>
+        <a class="quick-link" href="https://github.com/abhigyanpatwari/GitNexus" target="_blank">GitNexus</a>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // === Config ===
+    const LITELLM_URL = localStorage.getItem('proxy_url') || 'http://localhost:4001';
+    const LITELLM_KEY = localStorage.getItem('proxy_key') || 'sk-master-change-me';
+
+    // === Tab switching ===
+    function showTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav button').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // === Fetch LiteLLM data ===
+    async function fetchUsage() {
+      try {
+        const res = await fetch(`${LITELLM_URL}/spend/logs`, {
+          headers: { 'Authorization': `Bearer ${LITELLM_KEY}` }
+        });
+        if (!res.ok) throw new Error('LiteLLM not reachable');
+
+        const data = await res.json();
+        updateOverview(data);
+        updateBadge('badge-litellm', 'online', 'LiteLLM ●');
+      } catch (e) {
+        updateBadge('badge-litellm', 'offline', 'LiteLLM ○');
+        console.log('LiteLLM not available:', e.message);
+      }
+    }
+
+    async function checkHermes() {
+      try {
+        const res = await fetch('http://localhost:3000/health', { mode: 'no-cors' });
+        updateBadge('badge-hermes', 'online', 'Hermes ●');
+      } catch {
+        updateBadge('badge-hermes', 'offline', 'Hermes ○');
+      }
+    }
+
+    function updateBadge(id, status, text) {
+      const el = document.getElementById(id);
+      el.className = `badge ${status}`;
+      el.textContent = text;
+    }
+
+    function updateOverview(data) {
+      if (!data || !Array.isArray(data)) return;
+
+      const today = new Date().toISOString().split('T')[0];
+      const todayLogs = data.filter(d => d.startTime && d.startTime.startsWith(today));
+
+      let totalCost = 0, totalTokens = 0, totalIn = 0, totalOut = 0;
+      const modelStats = {};
+
+      todayLogs.forEach(log => {
+        totalCost += log.spend || 0;
+        const inT = log.prompt_tokens || 0;
+        const outT = log.completion_tokens || 0;
+        totalIn += inT;
+        totalOut += outT;
+        totalTokens += inT + outT;
+
+        const model = log.model || 'unknown';
+        if (!modelStats[model]) modelStats[model] = { requests: 0, tokens: 0, cost: 0 };
+        modelStats[model].requests++;
+        modelStats[model].tokens += inT + outT;
+        modelStats[model].cost += log.spend || 0;
+      });
+
+      document.getElementById('cost-today').textContent = `$${totalCost.toFixed(2)}`;
+      document.getElementById('requests-today').textContent = todayLogs.length;
+      document.getElementById('tokens-today').textContent = formatNum(totalTokens);
+      document.getElementById('tokens-in').textContent = formatNum(totalIn);
+      document.getElementById('tokens-out').textContent = formatNum(totalOut);
+
+      // Color coding for budget
+      const costEl = document.getElementById('cost-today');
+      if (totalCost > 5) costEl.className = 'card-value red';
+      else if (totalCost > 4) costEl.className = 'card-value yellow';
+      else costEl.className = 'card-value green';
+    }
+
+    function formatNum(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toString();
+    }
+
+    // === Settings ===
+    function saveKeys() {
+      // Luu vao localStorage (chi cho demo)
+      // Production: ghi vao .env qua API
+      const keys = {
+        openrouter: document.getElementById('key-openrouter').value,
+        kimi: document.getElementById('key-kimi').value,
+        anthropic: document.getElementById('key-anthropic').value,
+        gemini: document.getElementById('key-gemini').value,
+        deepseek: document.getElementById('key-deepseek').value,
+      };
+      localStorage.setItem('api_keys', JSON.stringify(keys));
+      document.getElementById('save-status').textContent = 'Saved! Restart docker compose de ap dung.';
+      setTimeout(() => document.getElementById('save-status').textContent = '', 3000);
+    }
+
+    function saveBudget() {
+      const budget = {
+        day: document.getElementById('budget-day').value,
+        month: document.getElementById('budget-month').value,
+        alert: document.getElementById('budget-alert').value,
+      };
+      localStorage.setItem('budget', JSON.stringify(budget));
+      alert('Budget saved. Cap nhat litellm_config.yaml de ap dung.');
+    }
+
+    async function testConnection() {
+      const url = document.getElementById('proxy-url').value;
+      const key = document.getElementById('proxy-key').value;
+      const statusEl = document.getElementById('conn-status');
+
+      localStorage.setItem('proxy_url', url);
+      localStorage.setItem('proxy_key', key);
+
+      try {
+        const res = await fetch(`${url}/health`, {
+          headers: { 'Authorization': `Bearer ${key}` }
+        });
+        if (res.ok) {
+          statusEl.style.color = 'var(--green)';
+          statusEl.textContent = 'Connected!';
+        } else {
+          statusEl.style.color = 'var(--red)';
+          statusEl.textContent = `Error: ${res.status}`;
+        }
+      } catch (e) {
+        statusEl.style.color = 'var(--red)';
+        statusEl.textContent = 'Connection failed';
+      }
+    }
+
+    // === Daily chart (placeholder) ===
+    function renderDailyChart() {
+      const container = document.getElementById('daily-chart');
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        days.push({
+          label: d.toLocaleDateString('vi', { day: '2-digit', month: '2-digit' }),
+          value: 0
+        });
+      }
+
+      container.innerHTML = days.map(d => `
+        <div class="bar-row">
+          <span class="bar-label">${d.label}</span>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:${Math.max(d.value / 5 * 100, 2)}%;background:var(--accent);">
+              ${d.value > 0 ? '$' + d.value.toFixed(2) : '—'}
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // === Init ===
+    fetchUsage();
+    checkHermes();
+    renderDailyChart();
+
+    // Refresh moi 30s
+    setInterval(() => {
+      fetchUsage();
+      checkHermes();
+    }, 30000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+# ============================================
+# Hermes Agent Config
+# Hien tai: goi Gemini qua LiteLLM proxy
+# Fallback: goi Gemini truc tiep neu proxy down
+# ============================================
+
+# Primary: goi qua LiteLLM proxy
+provider: custom
+model: default
+api_base: http://litellm:4000/v1
+
+# Fallback: Gemini truc tiep
+fallback_providers:
+  - provider: gemini
+    model: gemini-2.5-flash
+
+# Memory
+memory:
+  enabled: true
+  backend: sqlite
+  search: fts5
+  auto_summarize: true
+
+# Context optimization
+context:
+  max_tokens: 1000000
+  cache_system_prompt: true
+  cache_tools: true
+  compression:
+    enabled: true
+    strategy: summarize
+    threshold: 50000
+
+# Terminal
+terminal:
+  backend: local
+  shell: bash
+  timeout: 120
+
+# Web dashboard
+dashboard:
+  enabled: true
+  port: 3000
+  auth: false
+
+# Security
+security:
+  tirith:
+    enabled: true
+    block_dangerous_commands: true
+    allowed_paths:
+      - /projects/
+
+# Skills
+skills:
+  auto_learn: true
+  directory: /root/.hermes/skills/
+
+# Logging
+logging:
+  level: info
+  file: /root/.hermes/logs/hermes.log
