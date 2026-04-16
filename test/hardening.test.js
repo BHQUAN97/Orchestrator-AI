@@ -186,6 +186,38 @@ assert('Spent increased after reserve', agent.budgetTracker.spent > before);
 agent.budgetTracker.spent = Math.max(0, agent.budgetTracker.spent - reserved);
 assert('Spent restored after refund', agent.budgetTracker.spent === before);
 
+// === New endpoints helpers (round 4) ===
+console.log('\n=== Helpers cho new endpoints ===\n');
+
+delete require.cache[require.resolve('../router/orchestrator-agent')];
+const { OrchestratorAgent: OA0 } = require('../router/orchestrator-agent');
+const ag0 = new OA0({ projectDir: path.join(testDir, 'feat') });
+
+// Test: _estimatePlanCost
+console.log('Test FEAT-1: _estimatePlanCost');
+const est = ag0._estimatePlanCost({
+  subtasks: [
+    { model: 'cheap', estimated_tokens: 1000 },
+    { model: 'default', estimated_tokens: 5000 },
+    { model: 'fast', estimated_tokens: -1 }, // invalid → fallback 5000
+    { model: 'smart', estimated_tokens: null }, // invalid → fallback 5000
+  ]
+});
+assert('Total tokens cong don dung (1k+5k+5k+5k=16k)', est.total_tokens === 16000, `got ${est.total_tokens}`);
+assert('By model breakdown co 4 model', Object.keys(est.by_model).length === 4);
+assert('Cheap cost = 0.0005 × 1 = $0.0005', Math.abs(est.by_model.cheap.cost - 0.0005) < 1e-9);
+
+// Test: getHistory cap + filter
+console.log('\nTest FEAT-2: getHistory');
+ag0.executionLog.push({ timestamp: 't1', summary: 'A', project: 'foo', results: {1:{}}, escalations: [], models_used: ['cheap'], elapsed_ms: 100 });
+ag0.executionLog.push({ timestamp: 't2', summary: 'B', project: 'bar', results: {1:{}}, escalations: [], models_used: ['default'], elapsed_ms: 200 });
+ag0.executionLog.push({ timestamp: 't3', summary: 'C', project: 'foo', results: {1:{}}, escalations: [], models_used: ['fast'], elapsed_ms: 300 });
+const histAll = ag0.getHistory(10);
+assert('History returns array', Array.isArray(histAll));
+assert('History reverse order (newest first)', histAll[0].summary === 'C');
+const histFoo = ag0.getHistory(10, 'foo');
+assert('Filter by project', histFoo.length === 2 && histFoo.every(h => h.project === 'foo'));
+
 // === Budget TZ awareness (real-test fix) ===
 console.log('\n=== Budget TZ ===\n');
 

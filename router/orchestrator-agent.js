@@ -589,7 +589,8 @@ class OrchestratorAgent {
       elapsed_ms: elapsed,
       models_used: [...new Set(Object.values(results).map(r => r.model))],
       decisions_locked: this.decisionLock.getActive().length,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      project: context.project || null  // Tag de filter qua /api/history?project=
     };
 
     this.executionLog.push(execution);
@@ -598,6 +599,56 @@ class OrchestratorAgent {
     // Aggregate stats incrementally — chi cong them, khong recompute toan log
     this._aggregateStats(execution);
     return execution;
+  }
+
+  /**
+   * Uoc tinh chi phi plan tu so subtask × estimated_tokens × cost/model
+   * Dung cho dry-run + /api/estimate endpoint
+   */
+  _estimatePlanCost(plan) {
+    let totalTokens = 0;
+    let totalCost = 0;
+    const byModel = {};
+    for (const sub of (plan?.subtasks || [])) {
+      // Validate estimated_tokens — LLM doi khi tra -1 / 0 / null → fallback 5000
+      const rawTokens = sub.estimated_tokens;
+      const tokens = (typeof rawTokens === 'number' && rawTokens > 0) ? rawTokens : 5000;
+      const model = sub.model || 'default';
+      const costPer1K = MODEL_COST_PER_1K[model] || 0.001;
+      const cost = costPer1K * (tokens / 1000);
+      totalTokens += tokens;
+      totalCost += cost;
+      if (!byModel[model]) byModel[model] = { tokens: 0, cost: 0, count: 0 };
+      byModel[model].tokens += tokens;
+      byModel[model].cost += cost;
+      byModel[model].count++;
+    }
+    return {
+      total_tokens: totalTokens,
+      total_cost: `$${totalCost.toFixed(4)}`,
+      total_cost_raw: totalCost,
+      by_model: byModel,
+      subtasks: plan?.subtasks?.length || 0
+    };
+  }
+
+  /**
+   * Lay history executions gan day — dung cho /api/history endpoint
+   */
+  getHistory(limit = 20, project = null) {
+    let logs = this.executionLog.slice();
+    if (project) {
+      logs = logs.filter(e => e.project === project);
+    }
+    return logs.slice(-Math.min(limit, this.MAX_EXECUTION_LOG)).reverse().map(e => ({
+      timestamp: e.timestamp,
+      summary: e.summary?.slice(0, 200) || e.plan?.analysis?.slice(0, 200) || '',
+      models_used: e.models_used,
+      elapsed_ms: e.elapsed_ms,
+      tasks: Object.keys(e.results || {}).length,
+      escalations: e.escalations?.length || 0,
+      project: e.project || null
+    }));
   }
 
   /**
@@ -623,8 +674,18 @@ class OrchestratorAgent {
 
   /**
    * Full flow: plan → review → execute
+   * Options:
+   *  - context.dryRun = true → return plan + estimate, KHONG execute (an toan test)
+   *  - context.signal (AbortSignal) → cancel mid-pipeline (throw AbortError)
+   *  - context.project = '<name>' → attribute budget vao project rieng
    */
   async run(userPrompt, context = {}) {
+    const dryRun = context.dryRun === true;
+    const signal = context.signal || null;
+    const checkAbort = () => {
+      if (signal && signal.aborted) throw Object.assign(new Error('Run cancelled'), { code: 'ABORT' });
+    };
+
     // Tao trace moi cho toan bo pipeline
     const trace = this.tracer.start('run', {
       prompt: userPrompt.slice(0, 200),
@@ -633,6 +694,8 @@ class OrchestratorAgent {
     });
 
     try {
+      checkAbort();
+
       // Buoc 0+1 PARALLEL: classify + scan chay song song.
       // Truoc day sequential (classify → scan) ton ~300-500ms wait.
       // SLM classify (200-500ms) chay cung luc scanner (1-3s) → tiet kiem latency.
@@ -669,6 +732,22 @@ class OrchestratorAgent {
         return { status: 'error', ...summary.error_attribution, trace: summary };
       }
 
+      checkAbort();
+
+      // Dry-run: return plan + estimate, KHONG goi review/execute.
+      // An toan test prompt khong mutate file. Tiet kiem 80% chi phi.
+      if (dryRun) {
+        const summary = this.tracer.finish(trace);
+        const estimate = this._estimatePlanCost(plan);
+        return {
+          status: 'dry_run',
+          plan,
+          estimate,
+          trace: summary,
+          message: 'Dry-run: plan generated, execute SKIPPED (set dry=false to apply)'
+        };
+      }
+
       // Buoc 2: Tech Lead review (skip cho simple tasks)
       let approvedPlan = plan;
       if (isSimple) {
@@ -700,6 +779,8 @@ class OrchestratorAgent {
 
         approvedPlan = reviewResult.plan || plan;
       }
+
+      checkAbort();
 
       // Buoc 3: Execute
       trace.step('execute', { subtasks: approvedPlan.subtasks?.length });

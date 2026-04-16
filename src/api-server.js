@@ -29,6 +29,9 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
 const { OrchestratorAgent, AGENT_ROLE_MAP } = require('../router/orchestrator-agent');
 const { OrchestratorV3 } = require('../lib/orchestrator-v3');
 const { SmartRouter, MODEL_PROFILES } = require('../router/smart-router');
@@ -125,6 +128,50 @@ const orchestrator = new OrchestratorV3({
   useTools: true
 });
 
+// === Active runs registry — track running task de cancel + list ===
+const activeRuns = new Map();  // traceId → { signal, controller, prompt, startedAt, project }
+
+// === Templates store — file-backed JSON ===
+const TEMPLATES_PATH = path.join(__dirname, '..', 'data', 'templates.json');
+function loadTemplates() {
+  try { return JSON.parse(fs.readFileSync(TEMPLATES_PATH, 'utf8')); } catch { return {}; }
+}
+function saveTemplates(t) {
+  const dir = path.dirname(TEMPLATES_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(TEMPLATES_PATH, JSON.stringify(t, null, 2));
+}
+
+// === Slack/webhook notify (optional) ===
+const NOTIFY_WEBHOOK = process.env.NOTIFY_WEBHOOK_URL || '';
+async function notifyWebhook(payload) {
+  if (!NOTIFY_WEBHOOK) return;
+  try {
+    await fetch(NOTIFY_WEBHOOK, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000)
+    });
+  } catch (err) { console.warn('[Notify] webhook fail:', err.message); }
+}
+
+// === Rollback helper — git stash list + apply ===
+function listSnapshots(projectDir) {
+  try {
+    const out = execSync('git stash list --format="%H|%gd|%s|%ci"', { cwd: projectDir, encoding: 'utf8', timeout: 5000 });
+    return out.trim().split('\n').filter(Boolean).slice(0, 20).map(line => {
+      const [hash, ref, msg, date] = line.split('|');
+      return { hash: (hash || '').slice(0, 12), ref, message: msg, date };
+    });
+  } catch { return []; }
+}
+function applySnapshot(projectDir, hash) {
+  if (!/^[0-9a-f]{7,40}$/i.test(hash)) throw new Error('Invalid hash format');
+  execSync(`git stash apply ${hash}`, { cwd: projectDir, encoding: 'utf8', timeout: 10000 });
+  return true;
+}
+
 // === Request handler ===
 const server = http.createServer(async (req, res) => {
   const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
@@ -204,6 +251,62 @@ const server = http.createServer(async (req, res) => {
       if (!trace) return error(res, 404, `Trace "${traceId}" not found`);
       return json(res, trace);
     }
+
+    // GET /api/history?limit=20&project=foo — danh sach run gan day
+    if (url.pathname === '/api/history') {
+      const limit = parseInt(url.searchParams.get('limit') || '20');
+      const project = url.searchParams.get('project') || null;
+      return json(res, { runs: orchestrator.getHistory(Math.min(limit, 100), project) });
+    }
+
+    // GET /api/runs — danh sach run dang chay (cho cancel)
+    if (url.pathname === '/api/runs') {
+      const runs = [];
+      for (const [traceId, info] of activeRuns) {
+        runs.push({
+          traceId,
+          prompt: info.prompt.slice(0, 100),
+          project: info.project,
+          startedAt: info.startedAt,
+          elapsed_ms: Date.now() - info.startedAt
+        });
+      }
+      return json(res, { active: runs, count: runs.length });
+    }
+
+    // GET /api/rollback/list — snapshot co the rollback (git stash list)
+    if (url.pathname === '/api/rollback/list') {
+      const project = url.searchParams.get('project') || '';
+      const projectDir = project ? `/projects/${project.replace(/[^a-zA-Z0-9_-]/g, '')}` : '/app';
+      return json(res, { project: projectDir, snapshots: listSnapshots(projectDir) });
+    }
+
+    // GET /api/templates — danh sach saved prompts
+    if (url.pathname === '/api/templates') {
+      return json(res, { templates: loadTemplates() });
+    }
+  }
+
+  // === DELETE endpoints ===
+  if (req.method === 'DELETE') {
+    // DELETE /api/run/:traceId — cancel running task
+    if (url.pathname.startsWith('/api/run/')) {
+      const traceId = url.pathname.split('/api/run/')[1];
+      const info = activeRuns.get(traceId);
+      if (!info) return error(res, 404, `Run "${traceId}" not active`);
+      info.controller.abort();
+      activeRuns.delete(traceId);
+      return json(res, { cancelled: true, traceId });
+    }
+    // DELETE /api/templates/:name
+    if (url.pathname.startsWith('/api/templates/')) {
+      const name = decodeURIComponent(url.pathname.split('/api/templates/')[1] || '');
+      const t = loadTemplates();
+      if (!t[name]) return error(res, 404, `Template "${name}" not found`);
+      delete t[name];
+      saveTemplates(t);
+      return json(res, { deleted: name });
+    }
   }
 
   // === POST endpoints ===
@@ -217,6 +320,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     // POST /api/run — Full flow: scan → plan → review → execute
+    // Options moi:
+    //   body.dry = true → dry-run: return plan + estimate, KHONG execute
+    //   body.project = '<name>' → tag run de filter qua /api/history
     if (url.pathname === '/api/run') {
       if (!body.prompt || typeof body.prompt !== 'string') {
         return error(res, 400, 'Missing or invalid "prompt" field (must be string)');
@@ -226,13 +332,36 @@ const server = http.createServer(async (req, res) => {
         return error(res, 400, 'Prompt too long (max 50000 chars)');
       }
 
+      // Tao AbortController de support cancel qua DELETE /api/run/:traceId
+      const controller = new AbortController();
+      const traceId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const project = String(body.project || '').slice(0, 500);
+      activeRuns.set(traceId, {
+        controller, signal: controller.signal,
+        prompt: body.prompt, project, startedAt: Date.now()
+      });
+
       try {
         const result = await orchestrator.run(body.prompt, {
           files: sanitizeFileList(body.files),
-          project: String(body.project || '').slice(0, 500),
+          project,
           task: body.task || 'build',
           feature: body.feature || null,
-          contextData: String(body.context || '').slice(0, 20000)
+          contextData: String(body.context || '').slice(0, 20000),
+          dryRun: body.dry === true,
+          signal: controller.signal
+        });
+        activeRuns.delete(traceId);
+
+        // Notify webhook khi xong (Slack/Discord/custom)
+        notifyWebhook({
+          event: 'run_complete',
+          traceId,
+          project,
+          success: result.success !== false && result.status !== 'error',
+          status: result.status || 'done',
+          elapsed_ms: result.elapsed_ms,
+          summary: (result.summary || '').slice(0, 200)
         });
 
         // Check neu pipeline fail — tra error co trace
@@ -249,8 +378,23 @@ const server = http.createServer(async (req, res) => {
           });
         }
 
+        // Dry-run response: tra plan + estimate, KHONG execute
+        if (result.status === 'dry_run') {
+          return json(res, {
+            dry_run: true,
+            plan: result.plan,
+            estimate: result.estimate,
+            message: result.message,
+            trace: result.trace ? {
+              traceId: result.trace.traceId,
+              timeline: result.trace.timeline
+            } : null
+          });
+        }
+
         return json(res, {
           success: result.status !== 'rejected',
+          traceId,
           summary: result.summary || result.reason,
           plan: result.plan?.analysis,
           subtasks: result.plan?.subtasks?.length || 0,
@@ -266,8 +410,64 @@ const server = http.createServer(async (req, res) => {
           budget: orchestrator.getBudgetStatus()
         });
       } catch (err) {
+        activeRuns.delete(traceId);
+        if (err.code === 'ABORT') return error(res, 499, 'Run cancelled by user');
         return error(res, 500, err.message);
       }
+    }
+
+    // POST /api/estimate — uoc tinh chi phi truoc khi run (dung SLM classify + plan)
+    if (url.pathname === '/api/estimate') {
+      if (!body.prompt) return error(res, 400, 'Missing "prompt"');
+      try {
+        const plan = await orchestrator.plan(body.prompt, {
+          files: sanitizeFileList(body.files),
+          project: String(body.project || '').slice(0, 500),
+          task: body.task || 'build'
+        });
+        return json(res, {
+          estimate: orchestrator._estimatePlanCost(plan),
+          plan_summary: plan.analysis,
+          subtasks: plan.subtasks?.length || 0,
+          budget_remaining: orchestrator.getBudgetStatus().remaining
+        });
+      } catch (err) {
+        return error(res, 500, err.message);
+      }
+    }
+
+    // POST /api/rollback — apply git stash snapshot
+    if (url.pathname === '/api/rollback') {
+      const project = String(body.project || '').replace(/[^a-zA-Z0-9_-]/g, '');
+      const projectDir = project ? `/projects/${project}` : '/app';
+      const snapshots = listSnapshots(projectDir);
+      if (snapshots.length === 0) return error(res, 404, `No snapshots in ${projectDir}`);
+      const hash = body.hash || snapshots[0].hash;
+      try {
+        applySnapshot(projectDir, hash);
+        notifyWebhook({ event: 'rollback', project, hash });
+        return json(res, { rolled_back: true, hash, project: projectDir });
+      } catch (err) {
+        return error(res, 500, `Rollback failed: ${err.message}`);
+      }
+    }
+
+    // POST /api/templates — save a prompt template
+    if (url.pathname === '/api/templates') {
+      const name = String(body.name || '').trim().slice(0, 100);
+      if (!name) return error(res, 400, 'Missing "name"');
+      if (!body.prompt) return error(res, 400, 'Missing "prompt"');
+      const t = loadTemplates();
+      t[name] = {
+        prompt: String(body.prompt).slice(0, 50000),
+        files: sanitizeFileList(body.files),
+        task: body.task || 'build',
+        project: String(body.project || '').slice(0, 100),
+        created: t[name]?.created || new Date().toISOString(),
+        updated: new Date().toISOString()
+      };
+      saveTemplates(t);
+      return json(res, { saved: name, template: t[name] });
     }
 
     // POST /api/scan — Chi quet project
