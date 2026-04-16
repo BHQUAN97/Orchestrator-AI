@@ -169,7 +169,32 @@ class ContextManager {
     this.projectName = options.projectName || path.basename(this.projectDir);
     this.cache = new ContextCache({ ttlMinutes: options.cacheTTL || 30 });
     this.decisionLock = options.decisionLock || null; // DecisionLock instance
+    // Project metadata cache — detectStack/getGitInfo bi goi N lan/run.
+    // Stack thay doi rat hiem (cai package), git info thay doi sau commit.
+    // TTL 60s du dai cho 1 run, du ngan de catch thay doi giua cac run.
+    this._metaCache = { stack: null, git: null, expiry: 0 };
+    this._metaCacheTTL = options.metaCacheTTL || 60 * 1000;
   }
+
+  /**
+   * Lay project metadata co cache — detectStack + getGitInfo
+   * Tranh re-spawn git binary 8-16 lan/run (50-100ms moi spawn)
+   */
+  _getProjectMeta() {
+    const now = Date.now();
+    if (this._metaCache.stack && now < this._metaCache.expiry) {
+      return { stack: this._metaCache.stack, git: this._metaCache.git };
+    }
+    const stack = detectStack(this.projectDir);
+    const git = getGitInfo(this.projectDir);
+    this._metaCache = { stack, git, expiry: now + this._metaCacheTTL };
+    return { stack, git };
+  }
+
+  /**
+   * Invalidate meta cache — goi sau khi user lam thay doi project state
+   */
+  invalidateMeta() { this._metaCache.expiry = 0; }
 
   /**
    * Build structured context cho 1 task
@@ -179,14 +204,14 @@ class ContextManager {
     const ctx = JSON.parse(JSON.stringify(EMPTY_CONTEXT));
     ctx.timestamp = new Date().toISOString();
 
-    // 1. Project metadata
-    const gitInfo = getGitInfo(this.projectDir);
+    // 1. Project metadata — dung cache (TTL 60s) tranh spawn git + 18 file check moi build()
+    const meta = this._getProjectMeta();
     ctx.project = {
       name: this.projectName,
-      stack: detectStack(this.projectDir),
+      stack: meta.stack,
       dir: this.projectDir,
-      branch: gitInfo.branch,
-      lastCommit: gitInfo.lastCommit
+      branch: meta.git.branch,
+      lastCommit: meta.git.lastCommit
     };
 
     // 2. Task info

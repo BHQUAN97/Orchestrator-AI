@@ -186,6 +186,35 @@ assert('Spent increased after reserve', agent.budgetTracker.spent > before);
 agent.budgetTracker.spent = Math.max(0, agent.budgetTracker.spent - reserved);
 assert('Spent restored after refund', agent.budgetTracker.spent === before);
 
+// === ContextManager meta cache (round 3) ===
+console.log('\n=== ContextManager meta cache ===\n');
+
+const { ContextManager } = require('../router/context-manager');
+
+// Test 16: _getProjectMeta cache hit
+console.log('Test 16: Project meta cache');
+const cm = new ContextManager({ projectDir: process.cwd(), metaCacheTTL: 5000 });
+const meta1 = cm._getProjectMeta();
+assert('First call returns stack array', Array.isArray(meta1.stack));
+assert('First call returns git info', typeof meta1.git?.branch === 'string');
+
+// Theo doi: call thu 2 nen hit cache (khong spawn git lai)
+let detectStackCalls = 0;
+const origDetect = require('../router/context-manager').detectStack;
+// Inject spy: monkey-patch on instance khong duoc, test via cache state
+const expiry1 = cm._metaCache.expiry;
+const meta2 = cm._getProjectMeta();
+assert('Cached call: same expiry (no recompute)', cm._metaCache.expiry === expiry1);
+assert('Cached call: same stack ref', meta1.stack === meta2.stack);
+assert('Cached call: same git ref', meta1.git === meta2.git);
+
+// Test 17: invalidateMeta clears
+console.log('\nTest 17: invalidateMeta');
+cm.invalidateMeta();
+const meta3 = cm._getProjectMeta();
+assert('After invalidate: new expiry', cm._metaCache.expiry !== expiry1);
+assert('After invalidate: stack value match (re-computed)', JSON.stringify(meta3.stack) === JSON.stringify(meta1.stack));
+
 // === DecisionLock batch save (round 2) ===
 console.log('\n=== DecisionLock batch save ===\n');
 

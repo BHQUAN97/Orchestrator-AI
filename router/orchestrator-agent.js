@@ -631,25 +631,38 @@ class OrchestratorAgent {
     });
 
     try {
-      // Buoc 0: Pre-classify bang SLM — quyet dinh fast-path
+      // Buoc 0+1 PARALLEL: classify + scan chay song song.
+      // Truoc day sequential (classify → scan) ton ~300-500ms wait.
+      // SLM classify (200-500ms) chay cung luc scanner (1-3s) → tiet kiem latency.
+      // Trade-off: neu isSimple+files → scan call dung de nhung con re ($0.0005).
       trace.step('classify', { model: 'cheap' });
-      const classification = await this._classifyTask(userPrompt, context);
+      trace.step('scan', { model: 'cheap' });
+
+      const [clsRes, scanRes] = await Promise.allSettled([
+        this._classifyTask(userPrompt, context),
+        this.scan(userPrompt, context)
+      ]);
+
+      const classification = clsRes.status === 'fulfilled' ? clsRes.value : null;
       const isSimple = classification && classification.complexity === 'simple';
       trace.stepDone('classify', { complexity: classification?.complexity, fast_path: isSimple });
 
-      // Buoc 1: Scan + Plan
-      trace.step('scan', { model: isSimple ? 'cheap' : 'default' });
+      if (scanRes.status === 'rejected') {
+        trace.stepFail('scan', scanRes.reason, { model: 'cheap' });
+        const summary = this.tracer.finish(trace);
+        return { status: 'error', ...summary.error_attribution, trace: summary };
+      }
+      const scanResults = scanRes.value;
+      trace.stepDone('scan', { stack: scanResults?.stack?.length || 0 });
+
+      // Buoc 1b: Plan voi scan results da co (KHONG goi scan lan 2)
+      trace.step('plan', { model: isSimple ? 'default' : 'default' });
       let plan;
       try {
-        if (isSimple && (context.files || []).length > 0) {
-          // Fast-path: skip scan rieng, plan truc tiep voi micro-scan data
-          plan = await this.plan(userPrompt, { ...context, scanResults: null });
-        } else {
-          plan = await this.plan(userPrompt, context);
-        }
-        trace.stepDone('scan', { subtasks: plan.subtasks?.length });
+        plan = await this.plan(userPrompt, { ...context, scanResults });
+        trace.stepDone('plan', { subtasks: plan.subtasks?.length });
       } catch (err) {
-        trace.stepFail('scan', err, { model: 'cheap' });
+        trace.stepFail('plan', err, { model: 'default' });
         const summary = this.tracer.finish(trace);
         return { status: 'error', ...summary.error_attribution, trace: summary };
       }
