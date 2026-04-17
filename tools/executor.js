@@ -19,6 +19,7 @@ const { ToolPermissions } = require('./permissions');
 const { webFetch, webSearch } = require('./web-tools');
 const { glob } = require('./glob-tool');
 const { spawnSubagent } = require('./subagent');
+const { askUserQuestion } = require('./ask-user');
 
 class ToolExecutor {
   constructor(options = {}) {
@@ -36,6 +37,9 @@ class ToolExecutor {
     // Parent budget + hook runner — share voi subagent neu co
     this.parentBudget = options.parentBudget || null;
     this.parentHookRunner = options.parentHookRunner || null;
+
+    // Interactive mode flag — cho phep ask_user_question
+    this.interactive = !!options.interactive;
 
     // Diff approval callback — goi truoc write/edit trong interactive mode
     // Signature: (filePath, before, after) => 'yes' | 'no' | 'abort'
@@ -78,6 +82,7 @@ class ToolExecutor {
         if (!this.mcpRegistry) return { success: false, error: 'No MCP registry configured' };
         return await this.mcpRegistry.readResource(args.server, args.uri);
       },
+      'ask_user_question': async (args) => await askUserQuestion(args, { interactive: this.interactive }),
       'task_complete':   (args) => this._handleTaskComplete(args)
     };
 

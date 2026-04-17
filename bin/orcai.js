@@ -258,6 +258,7 @@ function createAgent(projectDir, opts) {
     budget: opts._budget || null,
     hookRunner: opts._hookRunner || null,
     hooks: opts.hooks !== false,
+    interactive: !!opts.interactive,
 
     // Diff approval — chi hoi trong interactive mode + co TTY
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
@@ -341,8 +342,10 @@ function createAgent(projectDir, opts) {
 
     onText: (text) => {
       if (spinner) spinner.stop();
-      const rendered = opts.markdown === false ? text : renderMarkdown(text);
-      process.stdout.write(rendered);
+      // Streaming: per-chunk passthrough (markdown rendering requires complete
+      // message to handle multi-char markers like ** and ``` correctly).
+      // renderMarkdown is applied to batched outputs (plan display, init, help).
+      process.stdout.write(text);
     },
 
     onError: (err) => {

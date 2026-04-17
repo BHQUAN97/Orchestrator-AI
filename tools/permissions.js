@@ -25,7 +25,7 @@ const ROLE_PERMISSIONS = {
   // Architect — full access, can doc/ghi/execute de design
   'architect': {
     level: 'execute',
-    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     limits: {
       execute_command: { maxCalls: 20, maxTimeout: 120000 },
       write_file: { maxCalls: 30 },
@@ -39,7 +39,7 @@ const ROLE_PERMISSIONS = {
   // Tech Lead — full access, review + escalation handler
   'tech-lead': {
     level: 'execute',
-    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     limits: {
       execute_command: { maxCalls: 15, maxTimeout: 60000 },
       write_file: { maxCalls: 20 },
@@ -53,7 +53,7 @@ const ROLE_PERMISSIONS = {
   // Builder/Dev — full access cho code
   'builder': {
     level: 'execute',
-    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     limits: {
       execute_command: { maxCalls: 30, maxTimeout: 120000 },
       write_file: { maxCalls: 50 },
@@ -65,7 +65,7 @@ const ROLE_PERMISSIONS = {
   },
   'fe-dev': {
     level: 'execute',
-    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     limits: {
       execute_command: { maxCalls: 30, maxTimeout: 120000 },
       write_file: { maxCalls: 50 },
@@ -77,7 +77,7 @@ const ROLE_PERMISSIONS = {
   },
   'be-dev': {
     level: 'execute',
-    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     limits: {
       execute_command: { maxCalls: 30, maxTimeout: 120000 },
       write_file: { maxCalls: 50 },
@@ -91,7 +91,7 @@ const ROLE_PERMISSIONS = {
   // Debugger — full access, can trace + fix
   'debugger': {
     level: 'execute',
-    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'spawn_subagent', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     limits: {
       execute_command: { maxCalls: 40, maxTimeout: 120000 },
       write_file: { maxCalls: 20 },
@@ -105,7 +105,7 @@ const ROLE_PERMISSIONS = {
   // Reviewer — chi doc, search, chay test. KHONG ghi file
   'reviewer': {
     level: 'read',
-    allowed: ['read_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'list_files', 'search_files', 'glob', 'execute_command', 'web_fetch', 'web_search', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     denied: ['write_file', 'edit_file', 'spawn_subagent'],
     limits: {
       execute_command: {
@@ -122,7 +122,7 @@ const ROLE_PERMISSIONS = {
   // Scanner — chi doc, KHONG ghi, KHONG execute
   'scanner': {
     level: 'read',
-    allowed: ['read_file', 'list_files', 'search_files', 'glob', 'web_fetch', 'web_search', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'list_files', 'search_files', 'glob', 'web_fetch', 'web_search', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     denied: ['write_file', 'edit_file', 'execute_command', 'spawn_subagent'],
     limits: {
       read_file: { maxCalls: 50 },
@@ -136,7 +136,7 @@ const ROLE_PERMISSIONS = {
   // Planner — chi doc, KHONG ghi, KHONG execute
   'planner': {
     level: 'read',
-    allowed: ['read_file', 'list_files', 'search_files', 'glob', 'web_fetch', 'web_search', 'read_mcp_resource', 'task_complete'],
+    allowed: ['read_file', 'list_files', 'search_files', 'glob', 'web_fetch', 'web_search', 'read_mcp_resource', 'ask_user_question', 'task_complete'],
     denied: ['write_file', 'edit_file', 'execute_command', 'spawn_subagent'],
     limits: {
       read_file: { maxCalls: 30 },

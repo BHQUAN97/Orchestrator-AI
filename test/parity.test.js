@@ -507,6 +507,26 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(typeof initProject === 'function');
   });
 
+  // --- Ask user question ---
+  await test('ask_user_question returns error in non-interactive mode', async () => {
+    const { askUserQuestion } = require('../tools/ask-user');
+    const res = await askUserQuestion({ question: 'test?' }, { interactive: false });
+    assert(!res.success);
+    assert(res.error.includes('NOT_INTERACTIVE'));
+  });
+
+  test('ask_user_question tool def present for builder', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('builder').map(t => t.function.name);
+    assert(tools.includes('ask_user_question'));
+  });
+
+  test('ask_user_question available for reviewer (read-only) too', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('reviewer').map(t => t.function.name);
+    assert(tools.includes('ask_user_question'));
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

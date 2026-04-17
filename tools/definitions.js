@@ -309,6 +309,35 @@ const TOOLS = [
     }
   },
 
+  // === USER INTERACTION ===
+  {
+    type: 'function',
+    function: {
+      name: 'ask_user_question',
+      description: 'Hoi user khi can clarification (2+ file cung ten, lua chon approach, thieu info). Chi dung trong interactive mode. KHONG dung bua — chi khi that su ambiguous.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: {
+            type: 'string',
+            description: 'Cau hoi ngan gon, ro rang (1-2 cau)'
+          },
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Cac lua chon goi y. Neu khong dua → free text input.'
+          },
+          allow_free_text: {
+            type: 'boolean',
+            description: 'Cho user nhap text tu do ngoai options. Mac dinh false.',
+            default: false
+          }
+        },
+        required: ['question']
+      }
+    }
+  },
+
   // === TASK MANAGEMENT ===
   {
     type: 'function',
