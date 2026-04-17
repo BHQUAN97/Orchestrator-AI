@@ -257,6 +257,35 @@ const TOOLS = [
     }
   },
 
+  // === BATCH EDIT ===
+  {
+    type: 'function',
+    function: {
+      name: 'edit_files',
+      description: 'Atomic multi-file edit. Validate TAT CA edits truoc khi ghi; neu bat ky fail → khong ghi gi. Ideal cho refactor xuyen file (rename symbol, update imports). Max 50 edits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          edits: {
+            type: 'array',
+            description: 'Array of edits. Moi edit giong edit_file: {path, old_string, new_string, replace_all?}',
+            items: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'File path' },
+                old_string: { type: 'string', description: 'String to find' },
+                new_string: { type: 'string', description: 'String to replace' },
+                replace_all: { type: 'boolean', description: 'Replace all occurrences', default: false }
+              },
+              required: ['path', 'old_string', 'new_string']
+            }
+          }
+        },
+        required: ['edits']
+      }
+    }
+  },
+
   // === MCP RESOURCES ===
   {
     type: 'function',

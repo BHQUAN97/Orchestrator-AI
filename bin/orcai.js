@@ -38,6 +38,17 @@ const { renderStatusLine } = require('../lib/status-line');
 const { WorktreeSession } = require('../lib/worktree');
 const { suggestSkills } = require('../lib/skill-matcher');
 const { renderMarkdown } = require('../lib/markdown-render');
+const { promptInput } = require('../lib/interactive-input');
+const { runDoctor, formatDoctor } = require('../lib/doctor');
+const { estimatePromptCost } = require('../lib/cost-estimate');
+
+const BUILTIN_CMDS = [
+  'stats', 'files', 'undo', 'sessions', 'resume',
+  'tokens', 'cost', 'budget', 'compact',
+  'init', 'plan', 'mcp', 'cache',
+  'doctor',
+  'exit', 'quit', 'help'
+];
 
 // === CLI Setup ===
 const program = new Command();
@@ -68,6 +79,8 @@ program
   .option('--worktree', 'Run agent in isolated git worktree (safer for destructive ops)')
   .option('--no-markdown', 'Disable markdown rendering in output')
   .option('--no-status-line', 'Hide status line in interactive mode')
+  .option('--doctor', 'Run environment health check and exit')
+  .option('--estimate-threshold <usd>', 'Confirm before run when estimated cost exceeds this (default 0.05)', '0.05')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
     const projectDir = path.resolve(opts.project);
@@ -122,6 +135,20 @@ program
     opts._approvalState = approvalState;
     opts._budget = budget;
     opts._hookRunner = hookRunner;
+
+    // --doctor: run health check and exit
+    if (opts.doctor) {
+      const results = await runDoctor({
+        projectDir,
+        litellmUrl: opts.url,
+        litellmKey: opts.key,
+        mcpRegistry,
+        hookRunner
+      });
+      console.log(formatDoctor(results));
+      if (mcpRegistry) await mcpRegistry.shutdown();
+      return;
+    }
 
     if (opts.interactive || !prompt) {
       await interactiveMode(projectDir, opts);
@@ -370,6 +397,25 @@ async function oneShotMode(prompt, projectDir, opts) {
 
   const systemPrompt = await buildSystemPrompt(projectDir, opts.role, opts);
 
+  // Pre-run cost estimate
+  const threshold = parseFloat(opts.estimateThreshold || '0.05');
+  if (!opts.yes && threshold > 0) {
+    const est = estimatePromptCost({ systemPrompt, userPrompt: expanded, model: opts.model });
+    if (est.cost_est_usd >= threshold) {
+      console.log(chalk.yellow(`  💰 Estimated cost: $${est.cost_est_usd.toFixed(4)} (range $${est.cost_range_usd[0].toFixed(4)} - $${est.cost_range_usd[1].toFixed(4)}), ~${est.iterations_est} iterations`));
+      try {
+        const { proceed } = await inquirer.prompt([{
+          type: 'confirm', name: 'proceed',
+          message: 'Proceed?', default: true
+        }]);
+        if (!proceed) {
+          console.log(chalk.gray('  Cancelled.'));
+          return;
+        }
+      } catch { return; /* Ctrl+C */ }
+    }
+  }
+
   // Plan mode: analyze first, then execute
   if (opts.plan) {
     const systemPlanner = await buildSystemPrompt(projectDir, 'planner', opts);
@@ -489,15 +535,15 @@ async function interactiveMode(projectDir, opts) {
 
     let input;
     try {
-      const answer = await inquirer.prompt([{
-        type: 'input',
-        name: 'prompt',
-        message: chalk.cyan('❯'),
-        prefix: ''
-      }]);
-      input = answer.prompt.trim();
+      // readline-based input voi tab completion cho /commands + @files
+      input = await promptInput({
+        projectDir,
+        customCommandNames: [...customCommands.keys()],
+        builtinCommandNames: BUILTIN_CMDS,
+        prompt: chalk.cyan('❯ ')
+      });
     } catch {
-      break; // Ctrl+C
+      break; // Ctrl+C / SIGINT
     }
 
     if (!input) continue;
@@ -583,6 +629,15 @@ async function interactiveMode(projectDir, opts) {
     if (input === '/cache on') { agent.promptCaching = true; console.log(chalk.gray('  cache: on')); continue; }
     if (input === '/cache off') { agent.promptCaching = false; console.log(chalk.gray('  cache: off')); continue; }
 
+    if (input === '/doctor') {
+      const results = await runDoctor({
+        projectDir, litellmUrl: opts.url, litellmKey: opts.key,
+        mcpRegistry: opts._mcpRegistry, hookRunner: opts._hookRunner
+      });
+      console.log(formatDoctor(results));
+      continue;
+    }
+
     if (input === '/budget') {
       const s = agent.budget.getStats();
       const cap = s.cap_usd === null ? 'unlimited' : `$${s.cap_usd.toFixed(4)}`;
@@ -663,6 +718,7 @@ async function interactiveMode(projectDir, opts) {
     /plan <task>      — Analyze + approval truoc khi execute
     /mcp              — MCP server status
     /cache on|off     — Bat/tat prompt caching
+    /doctor           — Health check moi truong
     /exit             — Thoat
     /help             — Hien help
 

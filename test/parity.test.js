@@ -527,6 +527,108 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(tools.includes('ask_user_question'));
   });
 
+  // --- Batch edit ---
+  await test('batch-edit rejects missing field', async () => {
+    const { batchEdit } = require('../tools/batch-edit');
+    const res = await batchEdit({ edits: [{ path: 'a.txt' }] }, {});
+    assert(!res.success);
+  });
+
+  await test('batch-edit atomic — all or nothing', async () => {
+    const { batchEdit } = require('../tools/batch-edit');
+    const { FileManager } = require('../tools/file-manager');
+    const projectDir = path.resolve(__dirname, '..');
+    const fm = new FileManager({ projectDir });
+
+    // Create 2 tmp files — one valid edit, one will fail
+    const tmpA = path.join(projectDir, 'TEST-BATCH-A.txt');
+    const tmpB = path.join(projectDir, 'TEST-BATCH-B.txt');
+    fs.writeFileSync(tmpA, 'hello world', 'utf-8');
+    fs.writeFileSync(tmpB, 'goodbye', 'utf-8');
+
+    try {
+      const res = await batchEdit({
+        edits: [
+          { path: 'TEST-BATCH-A.txt', old_string: 'hello', new_string: 'hi' },
+          { path: 'TEST-BATCH-B.txt', old_string: 'NONEXISTENT', new_string: 'x' } // will fail
+        ]
+      }, fm);
+
+      assert(!res.success, 'should fail on second edit');
+      // First file should NOT have been modified (atomic)
+      const a = fs.readFileSync(tmpA, 'utf-8');
+      assert(a === 'hello world', `atomic violation: ${a}`);
+    } finally {
+      fs.unlinkSync(tmpA);
+      fs.unlinkSync(tmpB);
+    }
+  });
+
+  test('edit_files tool def present for builder', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('builder').map(t => t.function.name);
+    assert(tools.includes('edit_files'));
+  });
+
+  // --- Doctor ---
+  await test('doctor reports Node version', async () => {
+    const { runDoctor } = require('../lib/doctor');
+    const results = await runDoctor({
+      projectDir: path.resolve(__dirname, '..'),
+      litellmUrl: null,  // skip litellm check
+      litellmKey: null
+    });
+    assert(Array.isArray(results));
+    const nodeCheck = results.find(r => r.name === 'Node.js');
+    assert(nodeCheck?.ok, 'Node.js check missing or failed');
+  });
+
+  // --- Cost estimate ---
+  test('cost-estimate produces positive bounded estimate', () => {
+    const { estimatePromptCost } = require('../lib/cost-estimate');
+    const est = estimatePromptCost({
+      systemPrompt: 'You are a coding agent.',
+      userPrompt: 'Fix the login bug in auth.js',
+      model: 'smart'
+    });
+    assert(est.cost_est_usd > 0);
+    assert(est.cost_est_usd < 1); // reasonable upper bound
+    assert(est.iterations_est > 0);
+    assert(est.cost_range_usd[0] <= est.cost_est_usd);
+    assert(est.cost_range_usd[1] >= est.cost_est_usd);
+  });
+
+  test('cost-estimate scales with task complexity', () => {
+    const { estimatePromptCost } = require('../lib/cost-estimate');
+    const simple = estimatePromptCost({ userPrompt: 'rename var x to y', model: 'default' });
+    const complex = estimatePromptCost({ userPrompt: 'refactor the whole auth system to use JWT', model: 'default' });
+    assert(complex.iterations_est > simple.iterations_est, 'refactor should estimate more iter');
+  });
+
+  // --- Interactive input completer ---
+  test('completer matches /commands', () => {
+    const { buildCompleter } = require('../lib/interactive-input');
+    const comp = buildCompleter({
+      projectDir: path.resolve(__dirname, '..'),
+      customCommandNames: ['developer'],
+      builtinCommandNames: ['stats', 'files', 'doctor']
+    });
+    const [matches] = comp('/st');
+    assert(matches.includes('/stats'));
+  });
+
+  test('completer matches @files', () => {
+    const { buildCompleter } = require('../lib/interactive-input');
+    const comp = buildCompleter({
+      projectDir: path.resolve(__dirname, '..'),
+      customCommandNames: [],
+      builtinCommandNames: []
+    });
+    const [matches] = comp('@lib/age');
+    // Should find lib/agent-loop.js
+    assert(matches.some(m => m.startsWith('@lib/agent')), `got ${matches.slice(0, 5).join(',')}`);
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

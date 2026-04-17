@@ -20,6 +20,7 @@ const { webFetch, webSearch } = require('./web-tools');
 const { glob } = require('./glob-tool');
 const { spawnSubagent } = require('./subagent');
 const { askUserQuestion } = require('./ask-user');
+const { batchEdit } = require('./batch-edit');
 
 class ToolExecutor {
   constructor(options = {}) {
@@ -63,6 +64,7 @@ class ToolExecutor {
       'read_file':       (args) => this.fileManager.readFile(args),
       'write_file':      (args) => this.fileManager.writeFile(args),
       'edit_file':       (args) => this.fileManager.editFile(args),
+      'edit_files':      (args) => batchEdit(args, this.fileManager),
       'list_files':      (args) => this.fileManager.listFiles(args),
       'search_files':    (args) => this.fileManager.searchFiles(args),
       'glob':            (args) => glob(args, this.projectDir),
