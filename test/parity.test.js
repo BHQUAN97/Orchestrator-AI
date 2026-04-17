@@ -629,6 +629,129 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(matches.some(m => m.startsWith('@lib/agent')), `got ${matches.slice(0, 5).join(',')}`);
   });
 
+  // --- CLAUDE.md hierarchy ---
+  await test('claude-md-loader loads from project dir', async () => {
+    const { loadClaudeMdHierarchy } = require('../lib/claude-md-loader');
+    const projectDir = path.resolve(__dirname, '..');
+    const tmpClaude = path.join(projectDir, 'CLAUDE.md');
+    const hadBefore = fs.existsSync(tmpClaude);
+    if (!hadBefore) fs.writeFileSync(tmpClaude, '# Test CLAUDE.md\n\nHello from project rules.', 'utf-8');
+    try {
+      const res = loadClaudeMdHierarchy(projectDir);
+      assert(res.sources.length >= 1, `expected at least 1 source, got ${res.sources.length}`);
+      assert(res.content.includes('Hello from project rules') || res.content.includes('CLAUDE.md'), 'content should include loaded rules');
+    } finally {
+      if (!hadBefore && fs.existsSync(tmpClaude)) fs.unlinkSync(tmpClaude);
+    }
+  });
+
+  test('claude-md-loader returns empty when nothing found', () => {
+    const { loadClaudeMdHierarchy } = require('../lib/claude-md-loader');
+    // Use a path that definitely has no CLAUDE.md
+    const res = loadClaudeMdHierarchy('/nonexistent/deep/subpath/xyz123');
+    // Might still find global ~/.claude/CLAUDE.md if user has one, so just check shape
+    assert(Array.isArray(res.sources));
+    assert(typeof res.content === 'string');
+  });
+
+  // --- Transcript logger ---
+  await test('TranscriptLogger writes JSONL', async () => {
+    const { TranscriptLogger } = require('../lib/transcript-logger');
+    const projectDir = path.resolve(__dirname, '..');
+    const logger = new TranscriptLogger({ projectDir, sessionId: 'test-' + Date.now() });
+    logger.logMeta({ event: 'test_start' });
+    logger.logToolCall('read_file', { path: 'foo.txt' });
+    const filePath = logger.getPath();
+    assert(filePath);
+    // Give fs a moment
+    await new Promise(r => setTimeout(r, 50));
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.trim().split('\n');
+    assert(lines.length === 2, `expected 2 lines, got ${lines.length}`);
+    assert(JSON.parse(lines[0]).type === 'meta');
+    assert(JSON.parse(lines[1]).type === 'tool_call');
+    fs.unlinkSync(filePath);
+  });
+
+  // --- Agent todos ---
+  test('AgentTodoStore upsert + list', () => {
+    const { AgentTodoStore, todoWrite, todoList } = require('../tools/agent-todos');
+    const store = new AgentTodoStore();
+    const res1 = todoWrite({ todos: [
+      { subject: 'Task A', status: 'pending' },
+      { subject: 'Task B', status: 'in_progress' }
+    ] }, store);
+    assert(res1.success);
+    assert(res1.todos.length === 2);
+    // Update by id
+    const id = res1.todos[0].id;
+    const res2 = todoWrite({ todos: [{ id, status: 'completed' }] }, store);
+    assert(res2.success);
+    const listed = todoList({}, store);
+    assert(listed.todos.length === 2);
+    const completed = listed.todos.find(t => t.id === id);
+    assert(completed.status === 'completed');
+    assert(completed.subject === 'Task A'); // preserved
+  });
+
+  test('todo_write tool available for builder', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('builder').map(t => t.function.name);
+    assert(tools.includes('todo_write'));
+    assert(tools.includes('todo_list'));
+  });
+
+  test('executor has todoStore', () => {
+    const { ToolExecutor } = require('../tools/executor');
+    const exec = new ToolExecutor({ projectDir: path.resolve(__dirname, '..') });
+    assert(exec.todoStore);
+    assert(typeof exec.todoStore.upsert === 'function');
+  });
+
+  // --- Extended thinking ---
+  test('extended-thinking auto-detects complex prompts', () => {
+    const { shouldEnableThinking } = require('../lib/extended-thinking');
+    assert(shouldEnableThinking('smart', 'refactor the authentication system', { autoDetect: true }));
+    assert(shouldEnableThinking('claude-opus', 'analyze deeply the performance bottleneck', { autoDetect: true }));
+    assert(!shouldEnableThinking('smart', 'fix typo in readme', { autoDetect: true }));
+  });
+
+  test('extended-thinking disabled for non-Claude models', () => {
+    const { shouldEnableThinking } = require('../lib/extended-thinking');
+    assert(!shouldEnableThinking('deepseek', 'refactor everything', { forceEnable: true }));
+    assert(!shouldEnableThinking('gpt-4', 'refactor everything', { autoDetect: true }));
+  });
+
+  test('applyThinking injects thinking param only when applicable', () => {
+    const { applyThinking } = require('../lib/extended-thinking');
+    const body1 = applyThinking({ model: 'smart' }, { model: 'smart', forceEnable: true, budget: 5000 });
+    assert(body1.thinking?.type === 'enabled');
+    assert(body1.thinking?.budget_tokens === 5000);
+    const body2 = applyThinking({ model: 'deepseek' }, { model: 'deepseek', forceEnable: true });
+    assert(!body2.thinking);
+  });
+
+  test('extractThinking handles content blocks', () => {
+    const { extractThinking, getMessageText } = require('../lib/extended-thinking');
+    const msg = { content: [
+      { type: 'thinking', thinking: 'Let me consider...' },
+      { type: 'text', text: 'Here is the answer.' }
+    ]};
+    assert(extractThinking(msg) === 'Let me consider...');
+    assert(getMessageText(msg) === 'Here is the answer.');
+  });
+
+  test('AgentLoop accepts thinking + transcriptLogger options', () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({
+      projectDir: path.resolve(__dirname, '..'),
+      thinking: true,
+      thinkingBudget: 5000
+    });
+    assert(agent.thinking === true);
+    assert(agent.thinkingBudget === 5000);
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

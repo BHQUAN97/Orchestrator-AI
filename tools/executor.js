@@ -21,6 +21,7 @@ const { glob } = require('./glob-tool');
 const { spawnSubagent } = require('./subagent');
 const { askUserQuestion } = require('./ask-user');
 const { batchEdit } = require('./batch-edit');
+const { AgentTodoStore, todoWrite, todoList } = require('./agent-todos');
 
 class ToolExecutor {
   constructor(options = {}) {
@@ -41,6 +42,10 @@ class ToolExecutor {
 
     // Interactive mode flag — cho phep ask_user_question
     this.interactive = !!options.interactive;
+
+    // Agent todo store (self-tracking during task)
+    this.todoStore = new AgentTodoStore();
+    this.onTodosUpdate = options.onTodosUpdate || null;
 
     // Diff approval callback — goi truoc write/edit trong interactive mode
     // Signature: (filePath, before, after) => 'yes' | 'no' | 'abort'
@@ -85,6 +90,8 @@ class ToolExecutor {
         return await this.mcpRegistry.readResource(args.server, args.uri);
       },
       'ask_user_question': async (args) => await askUserQuestion(args, { interactive: this.interactive }),
+      'todo_write':      (args) => todoWrite(args, this.todoStore, this.onTodosUpdate),
+      'todo_list':       (args) => todoList(args, this.todoStore),
       'task_complete':   (args) => this._handleTaskComplete(args)
     };
 
@@ -300,6 +307,7 @@ class ToolExecutor {
     this.filesChanged.clear();
     this.commandsRun = [];
     this.permissions.reset();
+    this.todoStore.reset();
   }
 
   /**

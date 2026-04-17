@@ -338,6 +338,47 @@ const TOOLS = [
     }
   },
 
+  // === AGENT SELF-TRACKING ===
+  {
+    type: 'function',
+    function: {
+      name: 'todo_write',
+      description: 'Bulk upsert agent self-todos de track progress trong task. Voi id → update (status: pending/in_progress/completed/deleted); khong id → create. Dung khi task phuc tap co > 3 step de user thay progress.',
+      parameters: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'integer', description: 'ID de update todo (omit de create moi)' },
+                subject: { type: 'string', description: 'Ten ngan (imperative: "Fix login bug")' },
+                activeForm: { type: 'string', description: 'Present continuous khi in_progress ("Fixing login bug")' },
+                description: { type: 'string', description: 'Chi tiet (optional)' },
+                status: {
+                  type: 'string',
+                  enum: ['pending', 'in_progress', 'completed', 'deleted'],
+                  description: 'Trang thai (mac dinh pending)'
+                }
+              }
+            }
+          }
+        },
+        required: ['todos']
+      }
+    }
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'todo_list',
+      description: 'Lay danh sach todos hien tai cua agent (trong session nay).',
+      parameters: { type: 'object', properties: {}, required: [] }
+    }
+  },
+
   // === USER INTERACTION ===
   {
     type: 'function',

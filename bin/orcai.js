@@ -41,12 +41,15 @@ const { renderMarkdown } = require('../lib/markdown-render');
 const { promptInput } = require('../lib/interactive-input');
 const { runDoctor, formatDoctor } = require('../lib/doctor');
 const { estimatePromptCost } = require('../lib/cost-estimate');
+const { loadClaudeMdHierarchy } = require('../lib/claude-md-loader');
+const { TranscriptLogger } = require('../lib/transcript-logger');
+const { renderTodos } = require('../tools/agent-todos');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
   'tokens', 'cost', 'budget', 'compact',
   'init', 'plan', 'mcp', 'cache',
-  'doctor',
+  'doctor', 'todos', 'transcript', 'claudemd',
   'exit', 'quit', 'help'
 ];
 
@@ -81,6 +84,10 @@ program
   .option('--no-status-line', 'Hide status line in interactive mode')
   .option('--doctor', 'Run environment health check and exit')
   .option('--estimate-threshold <usd>', 'Confirm before run when estimated cost exceeds this (default 0.05)', '0.05')
+  .option('--thinking', 'Enable extended thinking for Claude models')
+  .option('--thinking-budget <tokens>', 'Extended thinking budget (default 8000)', '8000')
+  .option('--no-thinking-auto', 'Disable auto-thinking for complex prompt keywords')
+  .option('--no-transcript', 'Disable transcript logging to .orcai/transcripts/')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
     const projectDir = path.resolve(opts.project);
@@ -209,7 +216,13 @@ function printBanner(projectDir, model, role) {
 async function buildSystemPrompt(projectDir, role, opts = {}) {
   const projectName = path.basename(projectDir);
 
-  // Direct mode: skip repo scan cho prompt nho gon + nhanh
+  // Load CLAUDE.md hierarchy (global + walk up parents)
+  const { content: claudeMd, sources: claudeMdSources } = loadClaudeMdHierarchy(projectDir);
+  const claudeMdBlock = claudeMd
+    ? `\n\n=== CLAUDE.md (${claudeMdSources.length} file${claudeMdSources.length > 1 ? 's' : ''}) ===\n${claudeMd}\n=== END CLAUDE.md ===`
+    : '';
+
+  // Direct mode: skip repo scan cho prompt nho gon + nhanh (nhung VAN bao gom CLAUDE.md)
   if (opts.direct) {
     return `Ban la AI Coding Agent trong project "${projectName}" (${projectDir}).
 
@@ -220,7 +233,7 @@ Nguyen tac:
 - Dung edit_file cho sua nho, write_file cho file moi/ghi de
 - Verify bang execute_command (test, build, lint)
 - Goi task_complete voi summary ngan khi xong
-- Comment business logic tieng Viet, technical tieng Anh`;
+- Comment business logic tieng Viet, technical tieng Anh${claudeMdBlock}`;
   }
 
   // Quét project structure — uu tien RepoCache (1hr TTL, invalidate theo git HEAD + package.json)
@@ -256,6 +269,7 @@ NGUYÊN TẮC:
 6. KHÔNG sửa file ngoài scope task
 7. Comment business logic bằng tiếng Việt, technical bằng tiếng Anh
 8. Task doc lap, research sau → dung spawn_subagent de giu context parent sach
+9. Task > 3 step → dung todo_write de track progress (user thay list)
 
 QUY TRÌNH:
 1. Đọc files liên quan (read_file, list_files, glob, search_files)
@@ -263,7 +277,7 @@ QUY TRÌNH:
 3. Thực hiện thay đổi (edit_file hoặc write_file)
 4. Verify (execute_command: chạy test, build, lint)
 5. Sửa nếu cần (self-correction loop)
-6. Gọi task_complete khi xong`;
+6. Gọi task_complete khi xong${claudeMdBlock}`;
 }
 
 // === Create Agent Loop với callbacks ===
@@ -286,6 +300,10 @@ function createAgent(projectDir, opts) {
     hookRunner: opts._hookRunner || null,
     hooks: opts.hooks !== false,
     interactive: !!opts.interactive,
+    thinking: !!opts.thinking,
+    thinkingAuto: opts.thinkingAuto !== false,
+    thinkingBudget: parseInt(opts.thinkingBudget || '8000'),
+    transcriptLogger: opts._transcriptLogger || null,
 
     // Diff approval — chi hoi trong interactive mode + co TTY
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
@@ -306,6 +324,16 @@ function createAgent(projectDir, opts) {
       }]);
       return confirmed;
     } : null,
+
+    // Agent self-todos: re-render moi khi thay doi
+    onTodosUpdate: (todos) => {
+      if (spinner) spinner.stop();
+      if (todos.length > 0) {
+        console.log(chalk.gray('  ── Todos ──'));
+        console.log(renderTodos(todos));
+        console.log(chalk.gray('  ───────────'));
+      }
+    },
 
     // Callbacks cho UI
     onThinking: (iter, max) => {
@@ -459,6 +487,12 @@ async function interactiveMode(projectDir, opts) {
   // Discover custom slash commands (skills/*.md + .claude/commands/*.md + global)
   const customCommands = discoverCommands(projectDir);
 
+  // Transcript logger
+  if (opts.transcript !== false) {
+    // Session created below; use tmp id until real session id exists
+    // (actual init happens after session creation)
+  }
+
   // Session management — support --resume
   const cm = new ConversationManager({ projectDir });
   let session;
@@ -484,7 +518,18 @@ async function interactiveMode(projectDir, opts) {
     session = cm.createSession();
   }
 
+  // Initialize transcript logger with actual session id
+  if (opts.transcript !== false) {
+    const logger = new TranscriptLogger({ projectDir, sessionId: session.id });
+    opts._transcriptLogger = logger;
+    agent.transcriptLogger = logger;
+    logger.logMeta({ event: 'session_start', sessionId: session.id, model: opts.model, role: opts.role });
+  }
+
   console.log(chalk.gray(`  Session: ${session.id}`));
+  if (opts._transcriptLogger) {
+    console.log(chalk.gray(`  Transcript: ${path.relative(projectDir, opts._transcriptLogger.getPath())}`));
+  }
   if (customCommands.size > 0) {
     console.log(chalk.gray(`  ${customCommands.size} custom command(s) loaded. /help to list.`));
   }
@@ -629,6 +674,36 @@ async function interactiveMode(projectDir, opts) {
     if (input === '/cache on') { agent.promptCaching = true; console.log(chalk.gray('  cache: on')); continue; }
     if (input === '/cache off') { agent.promptCaching = false; console.log(chalk.gray('  cache: off')); continue; }
 
+    if (input === '/todos') {
+      const todos = agent.executor.todoStore.list();
+      if (todos.length === 0) {
+        console.log(chalk.gray('  (no todos)'));
+      } else {
+        console.log(renderTodos(todos));
+        const stats = agent.executor.todoStore.getStats();
+        console.log(chalk.gray(`  total ${stats.total} | pending ${stats.pending} | in_progress ${stats.in_progress} | completed ${stats.completed}`));
+      }
+      continue;
+    }
+
+    if (input === '/transcript') {
+      const tp = opts._transcriptLogger?.getPath();
+      if (tp) console.log(chalk.gray(`  Transcript: ${tp}`));
+      else console.log(chalk.yellow('  Transcript logging disabled. Restart without --no-transcript.'));
+      continue;
+    }
+
+    if (input === '/claudemd') {
+      const { sources } = loadClaudeMdHierarchy(projectDir);
+      if (sources.length === 0) {
+        console.log(chalk.yellow('  No CLAUDE.md found in hierarchy. Try /init to generate one.'));
+      } else {
+        console.log(chalk.gray(`  CLAUDE.md hierarchy (${sources.length} file${sources.length > 1 ? 's' : ''}):`));
+        sources.forEach(s => console.log(chalk.gray(`    [${s.source}] ${s.path} (${s.bytes}B)`)));
+      }
+      continue;
+    }
+
     if (input === '/doctor') {
       const results = await runDoctor({
         projectDir, litellmUrl: opts.url, litellmKey: opts.key,
@@ -719,6 +794,9 @@ async function interactiveMode(projectDir, opts) {
     /mcp              — MCP server status
     /cache on|off     — Bat/tat prompt caching
     /doctor           — Health check moi truong
+    /todos            — Hien danh sach todos cua agent
+    /transcript       — Path den file transcript
+    /claudemd         — Liet ke CLAUDE.md da load
     /exit             — Thoat
     /help             — Hien help
 
