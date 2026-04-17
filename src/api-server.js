@@ -573,6 +573,150 @@ Neu loi/error: chan doan + cach sua.`;
       }
     }
 
+    // POST /api/vision-run — combo: vision analyze + full pipeline run.
+    // Step 1: callVisionModel → text analysis. Step 2: orchestrator.run() voi
+    // enriched prompt = user_prompt + "[Phan tich anh]: " + analysis.
+    // Use case: "fix bug trong screenshot" → vision mota bug → pipeline tu sua.
+    if (url.pathname === '/api/vision-run') {
+      if (!body.prompt) return error(res, 400, 'Missing "prompt"');
+      if (!Array.isArray(body.images) || !body.images.length) {
+        return error(res, 400, 'Missing "images" array (use /api/run neu khong co anh)');
+      }
+      const images = body.images.slice(0, 4);
+      const MAX_BYTES = 5 * 1024 * 1024;
+      for (const [i, img] of images.entries()) {
+        if (typeof img !== 'string') return error(res, 400, `Image ${i}: must be string`);
+        if (img.startsWith('data:')) {
+          const m = img.match(/^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/i);
+          if (!m) return error(res, 400, `Image ${i}: invalid data URL format`);
+          if (Math.floor(m[2].length * 3 / 4) > MAX_BYTES) return error(res, 413, `Image ${i}: exceeds 5MB`);
+        } else if (!/^https?:\/\//.test(img)) {
+          return error(res, 400, `Image ${i}: must be data URL or http(s) URL`);
+        }
+      }
+
+      // Setup active run + cancel support (giong /api/run)
+      const controller = new AbortController();
+      const traceId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const project = String(body.project || '').slice(0, 500);
+      const info = {
+        controller, signal: controller.signal,
+        prompt: body.prompt, project, startedAt: Date.now(), tracerId: null
+      };
+      activeRuns.set(traceId, info);
+      const startListener = (event) => {
+        if (event.type === 'start' && !info.tracerId) {
+          info.tracerId = event.traceId;
+          orchestrator.tracer.off('trace:event', startListener);
+        }
+      };
+      orchestrator.tracer.on('trace:event', startListener);
+
+      try {
+        // Step 1: Vision analyze
+        const visionStart = Date.now();
+        const visionPrompt = `Mo ta CHI TIET noi dung anh nay (UI elements, code, error message, layout...). Tieng Viet, ngan gon nhung day du.`;
+        const visionResult = await orchestrator.callVisionModel('fast', visionPrompt, body.prompt, images);
+        const visionElapsed = Date.now() - visionStart;
+
+        // Step 2: Build enriched prompt + run pipeline
+        const enrichedPrompt = `${body.prompt}
+
+[PHAN TICH ANH DINH KEM (${images.length} anh, model ${visionResult.model})]:
+${visionResult.text}`;
+
+        const runResult = await orchestrator.run(enrichedPrompt, {
+          files: sanitizeFileList(body.files),
+          project,
+          task: body.task || 'fix',
+          feature: body.feature || null,
+          dryRun: body.dry === true,
+          signal: controller.signal
+        });
+        activeRuns.delete(traceId);
+
+        notifyWebhook({
+          event: 'vision_run_complete', traceId, project,
+          success: runResult.success !== false && runResult.status !== 'error',
+          vision_tokens: visionResult.usage?.tokens || 0,
+          status: runResult.status || 'done',
+          elapsed_ms: runResult.elapsed_ms
+        });
+
+        return json(res, {
+          success: runResult.success !== false && runResult.status !== 'error',
+          traceId,
+          dry_run: runResult.status === 'dry_run',
+          vision: {
+            analysis: visionResult.text,
+            model: visionResult.model,
+            tokens: visionResult.usage?.tokens || 0,
+            elapsed_ms: visionElapsed
+          },
+          run: {
+            summary: runResult.summary || runResult.reason,
+            plan: runResult.plan?.analysis,
+            subtasks: runResult.plan?.subtasks?.length || 0,
+            models_used: runResult.models_used || [],
+            elapsed_ms: runResult.elapsed_ms,
+            estimate: runResult.estimate || null,
+            trace: runResult.trace ? {
+              traceId: runResult.trace.traceId,
+              timeline: runResult.trace.timeline,
+              elapsed_human: runResult.trace.elapsed_human
+            } : null
+          },
+          budget: orchestrator.getBudgetStatus()
+        });
+      } catch (err) {
+        activeRuns.delete(traceId);
+        if (err.code === 'ABORT') return error(res, 499, 'Run cancelled');
+        return error(res, 500, err.message);
+      }
+    }
+
+    // POST /api/pr — auto-create GitHub PR from current branch (gh CLI required).
+    // Body: { project, title?, body?, base? } — defaults: title from last commit,
+    // body from commit messages on branch, base=main.
+    if (url.pathname === '/api/pr') {
+      const projectName = String(body.project || '').replace(/[^a-zA-Z0-9_-]/g, '');
+      if (!projectName) return error(res, 400, 'Missing "project"');
+      const projectDir = `/projects/${projectName}`;
+      if (!fs.existsSync(projectDir)) return error(res, 404, `Project not mounted: ${projectDir}`);
+      if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
+        return error(res, 400, 'GH_TOKEN env not set — cannot create PR. Set in docker-compose env.');
+      }
+
+      try {
+        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectDir, encoding: 'utf8', timeout: 5000 }).trim();
+        if (branch === 'main' || branch === 'master') {
+          return error(res, 400, `Refusing PR from "${branch}" — switch to feature branch first`);
+        }
+        const base = body.base || 'main';
+        // Auto title from last commit subject neu khong dua
+        const title = body.title || execSync('git log -1 --format=%s', { cwd: projectDir, encoding: 'utf8', timeout: 5000 }).trim();
+        // Auto body from commit list neu khong dua
+        const prBody = body.body || execSync(`git log ${base}..HEAD --format="- %s"`, { cwd: projectDir, encoding: 'utf8', timeout: 5000 }).trim() || 'Auto-PR from orchestrator';
+
+        // Push branch len remote truoc khi PR (gh require remote tracking)
+        execSync(`git push -u origin ${branch}`, { cwd: projectDir, encoding: 'utf8', timeout: 30000 });
+
+        // Tao PR — escape title/body qua stdin de tranh shell injection
+        const safeTitle = title.replace(/"/g, '\\"').slice(0, 200);
+        const ghOut = execSync(`gh pr create --title "${safeTitle}" --body-file - --base ${base}`, {
+          cwd: projectDir, encoding: 'utf8', timeout: 30000,
+          input: prBody, env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN || process.env.GITHUB_TOKEN }
+        }).trim();
+
+        const prUrl = (ghOut.match(/https:\/\/github\.com\/[^\s]+/) || [])[0] || ghOut;
+        notifyWebhook({ event: 'pr_created', project: projectName, branch, url: prUrl });
+        return json(res, { success: true, pr_url: prUrl, branch, base, title });
+      } catch (err) {
+        const msg = err.stderr?.toString() || err.message;
+        return error(res, 500, `gh pr create failed: ${msg.slice(0, 500)}`);
+      }
+    }
+
     // POST /api/templates — save a prompt template
     if (url.pathname === '/api/templates') {
       const name = String(body.name || '').trim().slice(0, 100);

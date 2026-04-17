@@ -103,15 +103,16 @@ services:
       - /e/DEVELOP/LeQuyDon:/projects/LeQuyDon
       - /e/DEVELOP/WebPhoto:/projects/WebPhoto
       - /e/DEVELOP/RemoteTerminal:/projects/RemoteTerminal
-    # apk add git: alpine khong co git → getGitInfo() trong context-manager fail moi call
-    # → meta cache van work nhung cost 1 spawn fail moi 60s + bao "unknown" branch
-    command: ["sh", "-c", "apk add --no-cache git >/dev/null 2>&1 && node src/api-server.js"]
+    # apk add: git (getGitInfo + shadow-git), github-cli (POST /api/pr).
+    # Silent mode + redirect stderr de output sach, chi log Node startup.
+    command: ["sh", "-c", "apk add --no-cache git github-cli >/dev/null 2>&1 && node src/api-server.js"]
     environment:
       - PORT=5003
       - LITELLM_URL=http://litellm:4000
       - LITELLM_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
       - DAILY_BUDGET=2.00
       - TZ=${TZ:-Asia/Ho_Chi_Minh}
+      - GH_TOKEN=${GH_TOKEN:-}  # github-cli auth — set neu muon dung /api/pr
     depends_on:
       - litellm
     restart: unless-stopped

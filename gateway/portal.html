@@ -275,7 +275,8 @@
     <button class="btn" id="btnVoice" title="Voice input (Chrome/Edge)">🎙️ Voice</button>
     <label class="btn" for="imgInput" title="Upload anh (max 4, auto-resize 2048px)">🖼️ Image</label>
     <input type="file" id="imgInput" accept="image/*" multiple style="display:none" />
-    <button class="btn" id="btnVision" title="Phan tich anh + prompt">👁️ Vision</button>
+    <button class="btn" id="btnVision" title="Phan tich anh + prompt (chi text)">👁️ Vision</button>
+    <button class="btn primary" id="btnVisionRun" title="Vision → tu dong run pipeline sua code">👁️▶️ Vision+Run</button>
     <button class="btn" id="btnEstimate">💰 Estimate</button>
     <button class="btn warn" id="btnDry">🔍 Dry-run</button>
     <button class="btn primary" id="btnRun">▶️ Run</button>
@@ -503,6 +504,45 @@ document.getElementById('btnVision').onclick = async () => {
     log('Fetch error: ' + e.message, 'fail');
   } finally {
     document.getElementById('btnVision').disabled = false;
+  }
+};
+
+// === Vision + Run combo: phan tich anh → tu dong sua code qua pipeline ===
+document.getElementById('btnVisionRun').onclick = async () => {
+  if (!attachedImages.length) return log('Upload anh truoc khi Vision+Run', 'warn');
+  const body = getBody();
+  if (!body.prompt) return log('Nhap prompt mo ta task!', 'warn');
+  body.images = attachedImages.map(img => img.dataUrl);
+  clearOutput();
+  log(`👁️▶️ Vision+Run: ${attachedImages.length} anh + "${body.prompt.slice(0, 40)}..."`, 'info');
+  log('Step 1: Phan tich anh...', 'info');
+  document.getElementById('btnVisionRun').disabled = true;
+  document.getElementById('btnRun').disabled = true;
+  try {
+    const r = await fetch('/api/vision-run', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (d.error) return log('Error: ' + d.error, 'fail');
+    log(`✅ Vision DONE (${d.vision.elapsed_ms}ms, ${d.vision.tokens} tokens, model ${d.vision.model})`, 'ok');
+    log('--- Phan tich anh ---', 'info');
+    log(d.vision.analysis, 'info');
+    log('--- Pipeline ---', 'info');
+    if (d.dry_run) {
+      log(`🔍 DRY-RUN: ${d.run.subtasks} subtasks, est ${d.run.estimate?.total_cost || '?'}`, 'ok');
+    } else if (d.success) {
+      log(`✅ DONE (${d.run.elapsed_ms}ms, models: ${(d.run.models_used || []).join(', ')})`, 'ok');
+      log(d.run.summary || '(no summary)', 'info');
+    } else {
+      log(`❌ Pipeline FAILED`, 'fail');
+    }
+    refreshHistory(); refreshBudget(); refreshSnapshots(); refreshActive();
+  } catch (e) {
+    log('Fetch error: ' + e.message, 'fail');
+  } finally {
+    document.getElementById('btnVisionRun').disabled = false;
+    document.getElementById('btnRun').disabled = false;
   }
 };
 
