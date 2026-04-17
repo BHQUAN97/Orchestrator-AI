@@ -1,6 +1,16 @@
 # AI Orchestrator — Index tai lieu
 
-> Danh muc tat ca tai lieu, config, modules trong du an. Cap nhat: 2026-04-16
+> Danh muc tat ca tai lieu, config, modules trong du an. Cap nhat: 2026-04-17 (v2.2)
+
+## What's New v2.2 (2026-04-17)
+
+12 commit hardening + perf + features. Highlights:
+- **Security**: gateway auth hardening, prod startup guard, removed hardcoded LiteLLM key, SameSite=Strict, CSRF protection
+- **Reliability**: budget refund on retry exhausted, Architect ceiling break (chan $0.13 waste/task), batch I/O cho decision-lock, LiteLLM timeout 90s + retry network err
+- **Performance**: parallel classify+scan (~500ms), ContextManager meta cache (~1s/run), ring buffer executionLog (chan RAM leak), incremental getStats O(1), JSON parse fast-path 7.6×
+- **Features (10 endpoints moi)**: dry-run, cancel, rollback, history, estimate (heuristic), templates CRUD, runs, SSE live stream, voice input portal, NOTIFY_WEBHOOK
+- **Real-test fix**: git in alpine, BUDGET_TZ override, LiteLLM healthcheck endpoint, credit-aware auto-downgrade
+- **Tests**: 99 unit + 56 hardening = 155 pass
 
 ---
 
@@ -8,7 +18,7 @@
 
 | File | Mo ta |
 |------|-------|
-| [`README.md`](../README.md) | Tong quan v2.1 — architecture, quick start, model lineup |
+| [`README.md`](../README.md) | Tong quan v2.2 — architecture, quick start, model lineup, 10 endpoint moi, env vars |
 | [`.env.example`](../.env.example) | Mau bien moi truong (API keys, ports, budget) |
 | [`package.json`](../package.json) | Dependencies, scripts (`start`, `test`, `dev`), entry point |
 | [`index.js`](../index.js) | Export tat ca modules de dung programmatically |
@@ -225,8 +235,19 @@
 
 | File | Mo ta |
 |------|-------|
-| [`test-v2.2.js`](../test-v2.2.js) | Test suite v2.2 — integration tests cho pipeline |
-| [`router/test-router.js`](../router/test-router.js) | Unit tests cho smart router |
+| [`test-v2.2.js`](../test-v2.2.js) | Test suite v2.2 — 99 unit tests cho SLM/ShadowGit/TrustGraph/PipelineTracer |
+| [`test/hardening.test.js`](../test/hardening.test.js) | Hardening test — 56 assertions: DecisionLock TTL/batch-save, auth prod guard, ContextManager cache, budget TZ, executionLog cap, _estimatePlanCost, getHistory, credit error detection |
+| [`router/test-router.js`](../router/test-router.js) | Smoke tests cho smart router |
+| Run all: `npm test` (155 pass / 0 fail) |  |
+
+## Gateway / Portal (`gateway/`)
+
+| File | Mo ta |
+|------|-------|
+| [`portal.html`](../gateway/portal.html) | Mobile-friendly dashboard (540 LoC) — Quick Run + Voice (vi-VN) + Dry-run + Estimate + SSE live + Templates + History + Snapshots + Active runs cancel |
+| [`login.html`](../gateway/login.html) | Login page voi responsive design |
+| [`auth-server.js`](../gateway/auth-server.js) | HMAC token auth + prod startup guard + safeCompare timing-safe + body size limit |
+| [`nginx.conf`](../gateway/nginx.conf) | Reverse proxy + envsubst LITELLM_KEY (no hardcoded) + auth_request gating |
 
 ---
 

@@ -243,6 +243,17 @@ You need at least ONE provider key. **OpenRouter** is recommended (1 key = 200+ 
 | LiteLLM Gateway | 5002 | http://localhost:5002 | API gateway + model routing |
 | Orchestrator API | 5003 | http://localhost:5003 | REST API (scan/plan/execute) |
 | Analytics Dashboard | 5004 | http://localhost:5004 | Cost tracking + monitoring |
+| **Gateway + Portal** | **5005** | **http://localhost:5005/portal** | **Login + mobile-friendly dashboard (auth, voice, SSE live)** |
+
+### Portal (v2.2 — recommended UI)
+
+Sau khi `docker compose up -d`, mở `http://localhost:5005` (login admin/admin trong dev) → portal tích hợp:
+- **Quick Run**: project selector, task type, voice input (vi-VN), dry-run, estimate, run, cancel
+- **Live SSE stream**: theo dõi pipeline real-time (classify → scan → plan → execute)
+- **Templates**: lưu/load prompt thường dùng (`fix-mobile`, `add-jsdoc`...)
+- **History**: 10 run gần nhất, click để re-run
+- **Snapshots**: rollback git stash khi agent edit sai
+- **Active runs**: cancel task đang chạy (3s poll)
 
 ## Usage
 
@@ -261,18 +272,62 @@ orcai -p /path/to/project --model smart "refactor auth module"
 
 ### Via Orchestrator API
 
+Direct (port 5003 — no auth in dev) hoặc qua gateway (port 5005 — cookie auth, recommended):
+
 ```bash
+# === Core endpoints ===
 # Full flow: scan → plan → review → execute
 curl -X POST http://localhost:5003/api/run \
   -H "Content-Type: application/json" \
   -d '{"prompt": "Build login page with JWT auth", "project": "FashionEcom"}'
 
+# Dry-run: plan + estimate KHÔNG execute (8× faster, an toàn test)
+curl -X POST http://localhost:5003/api/run \
+  -d '{"prompt": "fix mobile button", "files": ["src/auth.ts"], "dry": true}'
+
 # Check budget
 curl http://localhost:5003/api/budget
-
-# Health check
 curl http://localhost:5003/health
+
+# === Utility endpoints (v2.2) ===
+# Estimate cost trước khi run (heuristic, ~500ms)
+curl -X POST http://localhost:5003/api/estimate \
+  -d '{"prompt": "refactor auth", "task": "refactor"}'
+
+# History 20 run gần nhất, filter theo project
+curl "http://localhost:5003/api/history?limit=20&project=FashionEcom"
+
+# Active runs đang chạy (cho cancel)
+curl http://localhost:5003/api/runs
+
+# Cancel task đang chạy
+curl -X DELETE http://localhost:5003/api/run/<traceId>
+
+# Live SSE stream pipeline progress (chấp nhận cả run-... lẫn trc-... id)
+curl -N http://localhost:5003/api/stream/<traceId>
+
+# Templates CRUD
+curl http://localhost:5003/api/templates                      # list
+curl -X POST http://localhost:5003/api/templates \
+  -d '{"name":"fix-mobile","prompt":"...","task":"fix"}'      # save
+curl -X DELETE http://localhost:5003/api/templates/fix-mobile # delete
+
+# Rollback git stash snapshot (sau khi agent edit sai)
+curl http://localhost:5003/api/rollback/list?project=FashionEcom
+curl -X POST http://localhost:5003/api/rollback \
+  -d '{"project":"FashionEcom","hash":"abc123de"}'
 ```
+
+### Environment variables (v2.2 mới)
+
+| Var | Default | Mô tả |
+|---|---|---|
+| `BUDGET_TZ` | `Asia/Ho_Chi_Minh` | Timezone reset budget (tránh container UTC) |
+| `DECISION_LOCK_TTL_HOURS` | `4` | TTL của decision lock (giảm từ 24h) |
+| `LITELLM_TIMEOUT_MS` | `90000` | Timeout/call LiteLLM (chống fetch hang) |
+| `RATE_MAP_MAX` | `10000` | Max IP entries trong rate-limit map |
+| `NOTIFY_WEBHOOK_URL` | — | Slack/Discord webhook khi run complete + rollback |
+| `AUTH_USERNAME/PASSWORD/JWT_SECRET` | (admin/admin/dev) | Production REQUIRES set, không dùng default |
 
 ### Via LiteLLM API directly
 

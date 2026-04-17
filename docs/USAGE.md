@@ -337,6 +337,132 @@ curl -X POST http://localhost:5003/api/plan \
 curl http://localhost:5003/api/budget
 ```
 
+### 7.5 Dry-run — test prompt KHONG mutate file (v2.2)
+
+```bash
+curl -X POST http://localhost:5003/api/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "fix bug button responsive mobile",
+    "files": ["src/auth.ts"],
+    "task": "fix",
+    "dry": true
+  }'
+```
+
+Response (dry_run mode — 8x nhanh hon full run):
+```json
+{
+  "dry_run": true,
+  "plan": { "analysis": "...", "subtasks": [...] },
+  "estimate": {
+    "total_cost": "$0.0050",
+    "total_tokens": 10000,
+    "by_model": { "default": { "tokens": 10000, "cost": 0.005 } }
+  },
+  "trace": { "traceId": "trc-...", "timeline": "..." }
+}
+```
+
+### 7.6 Estimate cost truoc khi run (v2.2)
+
+```bash
+# Heuristic (nhanh, ~500ms, dung SLM classify)
+curl -X POST http://localhost:5003/api/estimate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "refactor auth module", "task": "refactor"}'
+
+# Accurate (cham hon, goi plan() that)
+curl -X POST 'http://localhost:5003/api/estimate?accurate=1' \
+  -d '{"prompt": "refactor auth module"}'
+```
+
+### 7.7 History — 20 run gan day (v2.2)
+
+```bash
+curl 'http://localhost:5003/api/history?limit=20&project=FashionEcom'
+```
+
+### 7.8 Cancel run dang chay (v2.2)
+
+```bash
+# Liet ke active runs (lay traceId)
+curl http://localhost:5003/api/runs
+
+# Cancel
+curl -X DELETE http://localhost:5003/api/run/run-1776384478264-akev
+```
+
+### 7.9 Live SSE stream — theo doi pipeline real-time (v2.2)
+
+```bash
+# Browser/curl: nhan event tu start den finish
+curl -N http://localhost:5003/api/stream/run-1776384478264-akev
+
+# Output:
+# data: {"type":"connected","traceId":"trc-..."}
+# data: {"type":"step_done","step":"classify","elapsed_ms":3872}
+# data: {"type":"step_done","step":"scan","elapsed_ms":3872}     ← parallel
+# data: {"type":"step_start","step":"plan","model":"default"}
+# data: {"type":"step_done","step":"plan","elapsed_ms":6693}
+# data: {"type":"finish","status":"done","elapsed_human":"79.5s"}
+```
+
+Mobile UX: thay vi cho 1-2 phut staring man hinh, nhan tung step real-time.
+
+### 7.10 Templates — luu prompt thuong dung (v2.2)
+
+```bash
+# List
+curl http://localhost:5003/api/templates
+
+# Save
+curl -X POST http://localhost:5003/api/templates \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "fix-mobile",
+    "prompt": "Sua bug responsive tren mobile",
+    "task": "fix"
+  }'
+
+# Delete
+curl -X DELETE http://localhost:5003/api/templates/fix-mobile
+```
+
+### 7.11 Rollback git stash snapshot (v2.2)
+
+Khi agent edit file sai, rollback nhanh qua git stash:
+
+```bash
+# List snapshots co the rollback
+curl 'http://localhost:5003/api/rollback/list?project=FashionEcom'
+
+# Rollback to specific hash (default: most recent)
+curl -X POST http://localhost:5003/api/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"project": "FashionEcom", "hash": "abc123de"}'
+```
+
+---
+
+## 8. Portal (recommended UI — v2.2)
+
+Mobile-friendly dashboard tich hop tat ca:
+
+```
+http://localhost:5005/portal   (login: admin/admin trong dev)
+```
+
+Sections:
+- **Header**: user badge + logout + budget realtime
+- **Status bar**: 5 service health dots
+- **Quick Run**: project + task + files + voice (vi-VN) + 7 buttons
+- **Live output**: SSE stream pipeline events
+- **4 panels**: Active runs (poll 3s) | Recent runs (10) | Templates | Snapshots
+- **Services grid**: link den 5 services backend
+
+Voice input: Chrome/Edge native SpeechRecognition (free, no backend setup).
+
 Response:
 ```json
 {
