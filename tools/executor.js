@@ -26,6 +26,7 @@ const { memorySave, memoryRecall, memoryList } = require('./memory-tools');
 const { createSkill } = require('./create-skill');
 const { spawnTeam } = require('./spawn-team');
 const { decomposeTask } = require('./task-decompose');
+const { bgList, bgOutput, bgKill } = require('./background-bash');
 
 class ToolExecutor {
   constructor(options = {}) {
@@ -87,6 +88,9 @@ class ToolExecutor {
       'search_files':    (args) => this.fileManager.searchFiles(args),
       'glob':            (args) => glob(args, this.projectDir),
       'execute_command': (args) => this.terminalRunner.executeCommand(args),
+      'bg_list':         () => bgList(),
+      'bg_output':       (args) => bgOutput(args),
+      'bg_kill':         (args) => bgKill(args),
       'web_fetch':       (args) => webFetch(args),
       'web_search':      (args) => webSearch(args),
       'spawn_subagent':  (args) => spawnSubagent(args, {

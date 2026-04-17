@@ -234,7 +234,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'execute_command',
-      description: 'Chạy lệnh shell (bash). Dùng cho: npm, git, build, test, lint... Có timeout 30s mặc định. Lệnh nguy hiểm (rm -rf, drop, git push --force) sẽ bị chặn hoặc cần confirm.',
+      description: 'Chạy lệnh shell (bash). Dùng cho: npm, git, build, test, lint... Có timeout 30s mặc định. Lệnh nguy hiểm (rm -rf, drop, git push --force) sẽ bị chặn hoặc cần confirm. Voi background:true → spawn detached (dev server, watch), return PID ngay — dung bg_output/bg_kill sau.',
       parameters: {
         type: 'object',
         properties: {
@@ -250,9 +250,55 @@ const TOOLS = [
             type: 'integer',
             description: 'Timeout (ms). Mặc định 30000 (30s). Tối đa 120000 (2 phút)',
             default: 30000
+          },
+          background: {
+            type: 'boolean',
+            description: 'Spawn detached (dev server, tail -f, watch). Return PID ngay. Dung bg_output/bg_kill de quan ly.',
+            default: false
           }
         },
         required: ['command']
+      }
+    }
+  },
+
+  // === BACKGROUND PROCESSES ===
+  {
+    type: 'function',
+    function: {
+      name: 'bg_list',
+      description: 'Liet ke tat ca background processes da spawn. Tra ve PID, cmd, running status, exit code.',
+      parameters: { type: 'object', properties: {}, required: [] }
+    }
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'bg_output',
+      description: 'Lay output gan day cua background proc (tail mac dinh 50 dong).',
+      parameters: {
+        type: 'object',
+        properties: {
+          pid: { type: 'integer', description: 'PID cua bg proc' },
+          tail: { type: 'integer', description: 'So dong tail. Mac dinh 50.', default: 50 }
+        },
+        required: ['pid']
+      }
+    }
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'bg_kill',
+      description: 'Kill background proc theo PID. Dung khi dev server dung, hoac dep process leak.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pid: { type: 'integer', description: 'PID de kill' }
+        },
+        required: ['pid']
       }
     }
   },

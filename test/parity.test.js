@@ -896,6 +896,130 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(res.error.includes('Classifier'));
   });
 
+  // --- Parallel executor ---
+  test('isBatchReadSafe detects read-only batches', () => {
+    const { isBatchReadSafe } = require('../lib/parallel-executor');
+    assert(isBatchReadSafe([
+      { function: { name: 'read_file' } },
+      { function: { name: 'glob' } }
+    ]));
+    assert(!isBatchReadSafe([
+      { function: { name: 'read_file' } },
+      { function: { name: 'write_file' } }
+    ]));
+    assert(!isBatchReadSafe([{ function: { name: 'read_file' } }])); // too few
+  });
+
+  // --- Retry ---
+  await test('fetchWithRetry retries on 429', async () => {
+    const { fetchWithRetry } = require('../lib/retry');
+    let calls = 0;
+    const resp = await fetchWithRetry(async () => {
+      calls++;
+      if (calls < 3) {
+        return {
+          ok: false, status: 429,
+          headers: { get: () => '0' } // retry-after 0 → instant
+        };
+      }
+      return { ok: true, status: 200, headers: { get: () => null } };
+    }, { retries: 3 });
+    assert(calls === 3, `expected 3 calls, got ${calls}`);
+    assert(resp.ok);
+  });
+
+  await test('fetchWithRetry gives up after retries', async () => {
+    const { fetchWithRetry } = require('../lib/retry');
+    let calls = 0;
+    const resp = await fetchWithRetry(async () => {
+      calls++;
+      return { ok: false, status: 503, headers: { get: () => '0' } };
+    }, { retries: 2 });
+    assert(calls === 3, `1 initial + 2 retries = 3, got ${calls}`);
+    assert(!resp.ok);
+  });
+
+  // --- Stuck detector ---
+  test('StuckDetector detects repeat pattern', () => {
+    const { StuckDetector } = require('../lib/stuck-detector');
+    const d = new StuckDetector();
+    assert(d.record('read_file', { path: 'a.ts' }) === null);
+    assert(d.record('read_file', { path: 'a.ts' }) === null);
+    const stuck = d.record('read_file', { path: 'a.ts' });
+    assert(stuck, 'should detect repeat after 3x same call');
+    assert(stuck.type === 'repeat');
+  });
+
+  test('StuckDetector detects toggle pattern', () => {
+    const { StuckDetector } = require('../lib/stuck-detector');
+    const d = new StuckDetector();
+    // A,B,A,B,A — 5 calls alternating
+    d.record('read_file', { path: 'a.ts' });
+    d.record('read_file', { path: 'b.ts' });
+    d.record('read_file', { path: 'a.ts' });
+    d.record('read_file', { path: 'b.ts' });
+    const stuck = d.record('read_file', { path: 'a.ts' });
+    assert(stuck && stuck.type === 'toggle', `expected toggle, got ${stuck?.type}`);
+  });
+
+  // --- Background bash ---
+  await test('background bash spawn + output + kill', async () => {
+    const { getBgManager } = require('../tools/background-bash');
+    const mgr = getBgManager();
+    const cmd = process.platform === 'win32' ? 'ping -n 10 127.0.0.1' : 'sleep 5';
+    const pid = mgr.spawn(cmd, path.resolve(__dirname, '..'));
+    assert(typeof pid === 'number');
+    // List
+    const list = mgr.list();
+    assert(list.some(p => p.pid === pid));
+    // Kill
+    const killed = mgr.kill(pid);
+    assert(killed.success);
+    // Poll up to 3s for exit event to fire
+    let entry;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      entry = mgr.list().find(p => p.pid === pid);
+      if (entry && !entry.running) break;
+    }
+    assert(entry && !entry.running, `process should be marked stopped (running=${entry?.running}, exitCode=${entry?.exitCode})`);
+  });
+
+  // --- Orchestrator client ---
+  await test('orchestrator client reports unreachable when down', async () => {
+    const { checkOrchestratorHealth } = require('../lib/orchestrator-client');
+    const h = await checkOrchestratorHealth('http://localhost:1'); // unreachable
+    assert(!h.ok);
+  });
+
+  await test('delegateToOrchestrator returns error on unreachable', async () => {
+    const { delegateToOrchestrator } = require('../lib/orchestrator-client');
+    const res = await delegateToOrchestrator({
+      prompt: 'test',
+      projectDir: path.resolve(__dirname, '..'),
+      orchestratorUrl: 'http://localhost:1'
+    });
+    assert(!res.success);
+    assert(res.error.includes('unreachable'));
+  });
+
+  // --- Background tools registered ---
+  test('bg_* tools registered for builder', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('builder').map(t => t.function.name);
+    for (const n of ['bg_list', 'bg_output', 'bg_kill']) {
+      assert(tools.includes(n), `missing: ${n}`);
+    }
+  });
+
+  test('AgentLoop has stuckDetector + parallel flag', () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({ projectDir: path.resolve(__dirname, '..') });
+    assert(agent.stuckDetector);
+    assert(agent.parallelReadSafe === true);
+    assert(agent.retries === 3);
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

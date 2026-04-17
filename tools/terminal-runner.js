@@ -142,9 +142,46 @@ class TerminalRunner {
   }
 
   /**
-   * Chạy lệnh shell
+   * Chạy lệnh shell (foreground voi timeout, hoac background voi PID)
    */
-  async executeCommand({ command, cwd, timeout = DEFAULT_TIMEOUT }) {
+  async executeCommand({ command, cwd, timeout = DEFAULT_TIMEOUT, background = false }) {
+    // Background mode: spawn detached, return ngay
+    if (background) {
+      // 1. Check blocked (van apply — tranh spawn destructive bg)
+      const blockCheck = this._checkBlocked(command);
+      if (blockCheck.blocked) {
+        return { success: false, error: `BLOCKED: ${blockCheck.reason}`, exit_code: -1 };
+      }
+      // 2. Check confirm (bg commands van can user approve neu risky)
+      const confirmCheck = this._checkNeedsConfirm(command);
+      if (confirmCheck.needsConfirm) {
+        if (!this.confirmCallback) {
+          return { success: false, error: `BLOCKED: "${confirmCheck.reason}" — cần confirm nhưng không có confirm callback.`, exit_code: -1 };
+        }
+        const confirmed = await this.confirmCallback(command, confirmCheck.reason);
+        if (!confirmed) return { success: false, error: `User từ chối: ${confirmCheck.reason}`, exit_code: -1 };
+      }
+
+      const execCwd = cwd
+        ? (path.isAbsolute(cwd) ? cwd : path.resolve(this.projectDir, cwd))
+        : this.projectDir;
+
+      try {
+        const { getBgManager } = require('./background-bash');
+        const pid = getBgManager().spawn(command, execCwd);
+        return {
+          success: true,
+          background: true,
+          pid,
+          cmd: command.slice(0, 100),
+          cwd: execCwd,
+          hint: 'Use bg_output(pid) to read output, bg_kill(pid) to stop.'
+        };
+      } catch (e) {
+        return { success: false, error: `Background spawn failed: ${e.message}`, exit_code: -1 };
+      }
+    }
+
     // 1. Check blocked
     const blockCheck = this._checkBlocked(command);
     if (blockCheck.blocked) {

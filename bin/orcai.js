@@ -47,6 +47,7 @@ const { renderTodos } = require('../tools/agent-todos');
 const { MemoryStore } = require('../lib/memory');
 const { ContextGuard, formatIssues } = require('../lib/context-guard');
 const { HermesBridge } = require('../lib/hermes-bridge');
+const { delegateToOrchestrator, checkOrchestratorHealth } = require('../lib/orchestrator-client');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
@@ -54,6 +55,7 @@ const BUILTIN_CMDS = [
   'init', 'plan', 'mcp', 'cache',
   'doctor', 'todos', 'transcript', 'claudemd',
   'memory', 'team', 'guard', 'route', 'locks',
+  'orchestrator', 'orch', 'delegate', 'bg',
   'exit', 'quit', 'help'
 ];
 
@@ -97,6 +99,10 @@ program
   .option('--auto-route', 'Auto-select model per task using Hermes SmartRouter')
   .option('--use-classifier', 'Use LLM classifier for routing (more accurate, costs ~$0.0001/call)')
   .option('--no-hermes', 'Disable Hermes bridge (SmartRouter + DecisionLock)')
+  .option('--via-orchestrator', 'Delegate task to full Orchestrator pipeline (scan→plan→review→execute)')
+  .option('--orchestrator-url <url>', 'Orchestrator URL', process.env.ORCHESTRATOR_URL || 'http://localhost:5003')
+  .option('--no-parallel', 'Disable parallel execution of read-safe tools')
+  .option('--retries <n>', 'Number of LLM retries on network/429/503 errors (default 3)', '3')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
     const projectDir = path.resolve(opts.project);
@@ -181,6 +187,13 @@ program
       if (opts.autoRoute) {
         console.log(chalk.gray('  Auto-route: on (per-task model selection via SmartRouter)'));
       }
+    }
+
+    // --via-orchestrator: delegate to full pipeline
+    if (opts.viaOrchestrator && prompt) {
+      await orchestratorMode(prompt, projectDir, opts);
+      if (mcpRegistry) await mcpRegistry.shutdown();
+      return;
     }
 
     // --doctor: run health check and exit
@@ -370,6 +383,8 @@ function createAgent(projectDir, opts) {
     hermes: opts.hermes !== false,
     autoRoute: !!opts.autoRoute,
     useClassifier: !!opts.useClassifier,
+    parallelReadSafe: opts.parallel !== false,
+    retries: parseInt(opts.retries || '3'),
 
     // Diff approval — chi hoi trong interactive mode + co TTY
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
@@ -476,6 +491,42 @@ function createAgent(projectDir, opts) {
   });
 
   return { agent, getSpinner: () => spinner };
+}
+
+// === Orchestrator delegation ===
+async function orchestratorMode(prompt, projectDir, opts) {
+  const orchestratorUrl = opts.orchestratorUrl;
+  console.log(chalk.cyan(`  🤖 Delegating to Orchestrator at ${orchestratorUrl}...`));
+
+  const res = await delegateToOrchestrator({
+    prompt,
+    projectDir,
+    projectName: path.basename(projectDir),
+    orchestratorUrl,
+    onProgress: (evt) => {
+      if (evt.step) console.log(chalk.gray(`  [${evt.step}] ${evt.message || evt.status || ''}`));
+      else if (evt.message) console.log(chalk.gray(`  ${evt.message}`));
+    }
+  });
+
+  if (!res.success) {
+    console.log(chalk.red(`\n  ✗ Orchestrator delegation failed:`));
+    console.log(chalk.red(`    ${res.error}`));
+    console.log(chalk.gray('\n  Fallback: dung truc tiep orcai (bo --via-orchestrator flag)'));
+    return;
+  }
+
+  console.log(chalk.green('\n  ✓ Orchestrator completed'));
+  if (res.trace_id) console.log(chalk.gray(`    Trace: ${res.trace_id}`));
+  if (res.cost_usd) console.log(chalk.gray(`    Cost: $${res.cost_usd.toFixed(4)}`));
+  if (res.result?.summary) {
+    console.log('');
+    console.log(chalk.white(res.result.summary));
+  }
+  if (res.result?.files_changed?.length) {
+    console.log(chalk.gray(`    ${res.result.files_changed.length} files changed:`));
+    res.result.files_changed.forEach(f => console.log(chalk.green(`      + ${f}`)));
+  }
 }
 
 // === One-shot Mode ===
@@ -821,6 +872,31 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
+    if (input === '/orchestrator' || input === '/orch') {
+      const h = await checkOrchestratorHealth(opts.orchestratorUrl);
+      if (h.ok) console.log(chalk.gray(`  Orchestrator OK at ${h.url} (HTTP ${h.status})`));
+      else console.log(chalk.yellow(`  Orchestrator unreachable at ${h.url} — ${h.error || 'status ' + h.status}`));
+      continue;
+    }
+
+    if (input.startsWith('/delegate ')) {
+      const task = input.slice('/delegate '.length).trim();
+      if (!task) { console.log(chalk.yellow('  Usage: /delegate <task>')); continue; }
+      await orchestratorMode(task, projectDir, opts);
+      continue;
+    }
+
+    if (input === '/bg') {
+      const { bgList } = require('../tools/background-bash');
+      const res = await bgList();
+      if (res.procs.length === 0) { console.log(chalk.gray('  No background processes.')); continue; }
+      for (const p of res.procs) {
+        const status = p.running ? chalk.green('running') : chalk.gray(`exit ${p.exitCode}`);
+        console.log(chalk.gray(`  ${p.pid.toString().padStart(6)} [${status}] ${p.cmd}`));
+      }
+      continue;
+    }
+
     if (input === '/locks') {
       if (!opts._hermesBridge) { console.log(chalk.yellow('  Hermes disabled.')); continue; }
       const locks = opts._hermesBridge.getActiveLocks();
@@ -934,6 +1010,9 @@ async function interactiveMode(projectDir, opts) {
     /guard            — Ground truth cua context guard
     /route            — Last routing decisions (SmartRouter/classifier)
     /locks            — Active decision locks
+    /orchestrator     — Check Orchestrator health
+    /delegate <task>  — Delegate task to Orchestrator pipeline
+    /bg               — List background processes
     /exit             — Thoat
     /help             — Hien help
 
