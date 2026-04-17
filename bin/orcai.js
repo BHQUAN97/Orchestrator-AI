@@ -30,6 +30,11 @@ const { expandMentions } = require('../lib/mention-expander');
 const { discoverCommands, expandCommand, formatCommandList } = require('../lib/slash-commands');
 const { askApproval, ApprovalState } = require('../tools/diff-approval');
 const { getRegistry } = require('../tools/mcp-client');
+const { loadInheritedMCPConfig, listAvailableServers } = require('../lib/mcp-auto-config');
+const mcpCmds = (() => { try { return require('../tools/mcp-commands'); } catch { return null; } })();
+const { FsWatcher } = (() => { try { return require('../lib/fs-watcher'); } catch { return {}; } })();
+const { suggestParallelism } = (() => { try { return require('../lib/auto-concurrency'); } catch { return {}; } })();
+const { shutdownMemoryWorkers } = (() => { try { return require('../lib/memory'); } catch { return {}; } })();
 const { BudgetTracker } = require('../lib/budget');
 const { HookRunner } = require('../lib/hooks');
 const { runPlanFlow } = require('../lib/plan-mode');
@@ -107,6 +112,7 @@ program
   .option('--via-orchestrator', 'Delegate task to full Orchestrator pipeline (scan→plan→review→execute)')
   .option('--orchestrator-url <url>', 'Orchestrator URL', process.env.ORCHESTRATOR_URL || 'http://localhost:5003')
   .option('--no-parallel', 'Disable parallel execution of read-safe tools')
+  .option('--watch', 'Enable fs watcher to auto-invalidate cache on file changes')
   .option('--retries <n>', 'Number of LLM retries on network/429/503 errors (default 3)', '3')
   .option('--replay <sessionId>', 'Replay transcript from previous session (use "latest" for most recent)')
   .option('--replay-speed <ms>', 'Delay between events when replaying (default 0)', '0')
@@ -217,6 +223,27 @@ program
       opts._contextGuard = new ContextGuard();
     }
 
+    // Phase 3: Auto-concurrency hint + optional fs watcher
+    if (typeof suggestParallelism === 'function') {
+      try {
+        const p = suggestParallelism();
+        opts._parallelism = p;
+        if (process.env.ORCAI_DEBUG) {
+          console.log(chalk.gray(`  Concurrency: subagent=${p.subagent} llm=${p.llm} io=${p.file_read}`));
+        }
+      } catch { /* fallback to defaults */ }
+    }
+
+    // Fs watcher — invalidate cache khi file thay doi (opt-in, bat qua --watch)
+    if (opts.watch && typeof FsWatcher === 'function') {
+      try {
+        opts._fsWatcher = new FsWatcher({ paths: [projectDir] });
+        opts._fsWatcher.on('change', () => { /* hook cho cache invalidation — reserved */ });
+        opts._fsWatcher.on('error', () => {});
+        console.log(chalk.gray(`  Fs watcher: on (${projectDir})`));
+      } catch { /* optional */ }
+    }
+
     // Hermes bridge (SmartRouter + DecisionLock + classifier)
     if (opts.hermes !== false) {
       opts._hermesBridge = new HermesBridge({
@@ -238,6 +265,8 @@ program
     if (opts.viaOrchestrator && prompt) {
       await orchestratorMode(prompt, projectDir, opts);
       if (mcpRegistry) await mcpRegistry.shutdown();
+      if (opts._fsWatcher?.close) opts._fsWatcher.close();
+      if (typeof shutdownMemoryWorkers === 'function') await shutdownMemoryWorkers();
       return;
     }
 
@@ -252,6 +281,8 @@ program
       });
       console.log(formatDoctor(results));
       if (mcpRegistry) await mcpRegistry.shutdown();
+      if (opts._fsWatcher?.close) opts._fsWatcher.close();
+      if (typeof shutdownMemoryWorkers === 'function') await shutdownMemoryWorkers();
       return;
     }
 
@@ -819,17 +850,58 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
-    if (input === '/mcp') {
+    if (input === '/mcp' || input.startsWith('/mcp ')) {
       const registry = opts._mcpRegistry;
-      if (!registry) {
-        console.log(chalk.gray('  MCP: no servers connected'));
-      } else {
-        const stats = registry.getStats();
-        console.log(chalk.gray(`  MCP: ${stats.servers} server(s), ${stats.tools} tool(s)`));
-        stats.serverList.forEach(s => console.log(chalk.gray(`    - ${s}`)));
-        if (stats.errors.length > 0) {
-          stats.errors.forEach(e => console.log(chalk.yellow(`    ⚠ ${e.server || e.path}: ${e.error}`)));
+      const sub = input.slice(4).trim(); // empty | "list" | "tools <srv>" | "enable <srv>" | "disable <srv>" | "call <mcp__s__t> {json}"
+
+      // Legacy behavior: /mcp (no args) → status
+      if (!sub) {
+        if (!registry) {
+          console.log(chalk.gray('  MCP: no servers connected'));
+        } else {
+          const stats = registry.getStats();
+          console.log(chalk.gray(`  MCP: ${stats.servers} server(s), ${stats.tools} tool(s)`));
+          stats.serverList.forEach(s => console.log(chalk.gray(`    - ${s}`)));
+          if (stats.errors.length > 0) {
+            stats.errors.forEach(e => console.log(chalk.yellow(`    ⚠ ${e.server || e.path}: ${e.error}`)));
+          }
+          console.log(chalk.gray('  Subcmds: /mcp list | /mcp tools <srv> | /mcp enable <srv> | /mcp disable <srv> | /mcp call <mcp__s__t> <json>'));
         }
+        continue;
+      }
+
+      if (!mcpCmds) { console.log(chalk.yellow('  mcp-commands module missing')); continue; }
+
+      const [action, ...rest] = sub.split(/\s+/);
+      try {
+        if (action === 'list') {
+          const out = listAvailableServers(projectDir);
+          const servers = Array.isArray(out) ? out : (out.servers || []);
+          console.log(chalk.gray(`  Available servers (${servers.length}):`));
+          servers.forEach(s => {
+            const flag = s.disabled ? chalk.red('✗') : chalk.green('✓');
+            const transport = s.transport || (s.command ? 'stdio' : 'sse');
+            console.log(chalk.gray(`    ${flag} ${s.name.padEnd(20)} ${chalk.dim(s.source)} ${chalk.dim('['+transport+']')}`));
+          });
+        } else if (action === 'tools') {
+          const r = await mcpCmds.mcpTools(registry, rest[0]);
+          console.log(r.output);
+        } else if (action === 'enable') {
+          const r = await mcpCmds.mcpEnable(projectDir, rest[0]);
+          console.log(r.ok ? chalk.green(r.output) : chalk.yellow(r.output));
+        } else if (action === 'disable') {
+          const r = await mcpCmds.mcpDisable(projectDir, rest[0]);
+          console.log(r.ok ? chalk.green(r.output) : chalk.yellow(r.output));
+        } else if (action === 'call') {
+          const toolName = rest[0];
+          const argsJson = rest.slice(1).join(' ') || '{}';
+          const r = await mcpCmds.mcpCall(registry, toolName, argsJson);
+          console.log(r.output);
+        } else {
+          console.log(chalk.yellow(`  Unknown subcmd: ${action}`));
+        }
+      } catch (e) {
+        console.log(chalk.red(`  MCP error: ${e.message}`));
       }
       continue;
     }

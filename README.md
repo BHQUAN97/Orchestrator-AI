@@ -96,6 +96,57 @@ All agents receive context as structured JSON:
 - Includes: project metadata, task info, locked decisions, spec/plan, previous results
 - Output normalization: standardizes results before passing to next agent
 
+### Claude Code Parity (v2.3)
+
+Tool suite mo rong len **46 tools** — ngang voi Claude Code + tool rieng cho Windows.
+
+**MCP support (day du):**
+- stdio + SSE transport (spec 2024-11-05)
+- Auto-inherit MCP server tu `~/.claude.json` va `~/.claude/settings.json` — dung lai cau hinh cua Claude Code (playwright, context7, github, linear, notion, filesystem, memory, brave-search...)
+- Slash commands: `/mcp list | tools <srv> | enable <srv> | disable <srv> | call <mcp__s__t> <json>`
+- Per-project override qua `.orcai/mcp.json`
+
+**Windows-native tools (9):**
+| Tool | Muc dich |
+|---|---|
+| `ps_command` | Chay PowerShell script (base64 encode, timeout, 100KB truncate) |
+| `everything_search` | Search file bang Everything (voidtools) — nhanh hon grep 100x; fallback Get-ChildItem |
+| `clipboard_read` / `clipboard_write` | Doc/ghi clipboard |
+| `event_log` | Windows Event Log (filter level, source, since_minutes) |
+| `wmi_query` | Get-CimInstance (Win32_Process, Win32_Service, Win32_LogicalDisk...) |
+| `wsl_exec` | Passthrough bash vao WSL distro |
+| `winget_search` | Tim package qua winget |
+| `sys_info` | CPU/RAM/disk/GPU nhanh ~1s |
+
+**AST refactor (cross-platform, JS/TS):**
+- `ast_parse` — parse file → symbol list (functions, classes, exports)
+- `ast_find_symbol` — tim reference trong 1 file (decl + usages, bo qua property access)
+- `ast_find_usages` — tim xuyen nhieu file (max 100) cho impact analysis
+- `ast_rename_symbol` — rename bang AST binding (dry-run mac dinh)
+- Can: `@babel/parser`, `@babel/traverse`, `@babel/generator` (optional deps)
+
+**Git structured ops:**
+- `git_advanced` 1 tool / 8 action: `blame | log | diff | stash | branch | status | show | cherry_pick`
+- Destructive ops (`push`, `reset --hard`, `rebase`) → tu choi, chi dinh `execute_command`
+
+**Screenshot → Vision pipeline (Windows):**
+- `capture_screen` — full/monitor index/region; tra ve file path + base64
+- `capture_window` — chup cua so theo title (EnumWindows + GetWindowRect)
+- `list_monitors` — enumerate display
+- Integrate voi `/api/vision` (Gemini Flash) co san cho pipeline debug UI
+
+**Semantic search (API-based, no Python):**
+- `embed_index` — chunk + embed file qua LiteLLM (`text-embedding-3-small` ~$0.03 / 500 files)
+- `embed_search` — cosine similarity, top-K, regex path filter
+- `embed_stats` / `embed_clear` — quan ly store `.orcai/embeddings/`
+
+**Performance (Phase 3):**
+- Worker pool `node:worker_threads` — TF-IDF chay parallel tren CPU cores
+- 2-tier RAM cache (Map LRU + spill `%LOCALAPPDATA%\orcai\cache`)
+- Auto-concurrency dua tren `os.freemem()` + `os.cpus()` (cpu_bound / io_bound / llm_call)
+- Native `fs.watch({recursive: true})` voi 200ms debounce — opt-in qua `--watch`
+- Memory `searchAsync()` offload worker khi docs ≥ 100 (fallback inline neu worker fail)
+
 ## Project Structure
 
 ```

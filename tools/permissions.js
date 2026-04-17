@@ -170,6 +170,57 @@ const ROLE_PERMISSIONS = {
 // MCP tools (prefix mcp__) duoc phep cho moi role co level 'execute' — orcai khong phan quyen chi tiet theo MCP tool
 const MCP_TOOL_PREFIX = 'mcp__';
 
+// Windows-native tools (Phase 2) — cho phep tu dong voi role level 'execute'
+const WINDOWS_TOOLS = [
+  'ps_command', 'everything_search', 'clipboard_read', 'clipboard_write',
+  'event_log', 'wmi_query', 'wsl_exec', 'winget_search', 'sys_info',
+  // Windows-only visual tools
+  'capture_screen', 'capture_window', 'list_monitors'
+];
+// Read-only Windows tools — cho phep ca roles level 'read'
+const WINDOWS_READ_ONLY = [
+  'clipboard_read', 'event_log', 'wmi_query', 'winget_search', 'sys_info', 'everything_search',
+  'capture_screen', 'capture_window', 'list_monitors'
+];
+
+// Advanced tools (cross-platform) — phan cap theo tac dong
+const ADVANCED_READ_TOOLS = [
+  // AST read-only
+  'ast_parse', 'ast_find_symbol', 'ast_find_usages',
+  // Embedding search (khong ghi file source, chi ghi .orcai/embeddings)
+  'embed_search', 'embed_stats'
+];
+const ADVANCED_WRITE_TOOLS = [
+  // AST rename ghi file source
+  'ast_rename_symbol',
+  // Git ops va embedding index co side effect
+  'git_advanced', 'embed_index', 'embed_clear'
+];
+
+// Auto-inject vao profile
+for (const profile of Object.values(ROLE_PERMISSIONS)) {
+  if (!Array.isArray(profile.allowed)) continue;
+  const denied = profile.denied || [];
+  const add = (list) => {
+    for (const t of list) {
+      if (!profile.allowed.includes(t) && !denied.includes(t)) profile.allowed.push(t);
+    }
+  };
+  // Execute roles: full access
+  if (profile.level === 'execute') {
+    add(WINDOWS_TOOLS);
+    add(ADVANCED_READ_TOOLS);
+    add(ADVANCED_WRITE_TOOLS);
+  } else if (profile.level === 'write') {
+    add(WINDOWS_READ_ONLY);
+    add(ADVANCED_READ_TOOLS);
+    add(ADVANCED_WRITE_TOOLS);
+  } else if (profile.level === 'read') {
+    add(WINDOWS_READ_ONLY);
+    add(ADVANCED_READ_TOOLS);
+  }
+}
+
 class ToolPermissions {
   constructor(agentRole = 'builder') {
     this.role = agentRole;

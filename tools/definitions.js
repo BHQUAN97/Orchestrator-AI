@@ -626,4 +626,156 @@ function getToolsSummary() {
   ).join('\n');
 }
 
+// === WINDOWS-NATIVE TOOLS (Phase 2) ===
+// Append platform-specific tools — chi them neu chay tren Windows de tranh rac schema tren Linux/Mac
+if (process.platform === 'win32') {
+  try {
+    const { WINDOWS_TOOL_DEFINITIONS } = require('./windows');
+    TOOLS.push(...WINDOWS_TOOL_DEFINITIONS);
+  } catch (e) {
+    // Windows tools optional — neu load fail, bo qua
+  }
+}
+
+// === ADVANCED TOOLS (ast_parse, git_advanced, screenshot, embedding) ===
+// AST parsing (JS/TS) — cross-platform
+TOOLS.push(
+  {
+    type: 'function',
+    function: {
+      name: 'ast_parse',
+      description: 'Parse JS/TS file thanh AST, tra ve danh sach symbols (functions, classes, top-level const, exports). Chinh xac hon grep cho refactor.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Duong dan file .js/.jsx/.ts/.tsx/.mjs/.cjs' },
+          include_locations: { type: 'boolean', default: true }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ast_find_symbol',
+      description: 'Tim moi reference cua symbol trong 1 file (declaration + usages). Phan biet declaration vs reference, bo qua property access trung ten.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          symbol_name: { type: 'string' }
+        },
+        required: ['path', 'symbol_name']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ast_find_usages',
+      description: 'Tim usages cua symbol xuyen nhieu file (max 100). Dung cho impact analysis truoc khi refactor.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol_name: { type: 'string' },
+          files: { type: 'array', items: { type: 'string' }, description: 'Danh sach file de quet, max 100' }
+        },
+        required: ['symbol_name', 'files']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ast_rename_symbol',
+      description: 'Rename symbol trong 1 file bang AST (khong ham ho property access). Dry-run mac dinh — doi dry_run=false de ghi.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          old_name: { type: 'string' },
+          new_name: { type: 'string' },
+          dry_run: { type: 'boolean', default: true }
+        },
+        required: ['path', 'old_name', 'new_name']
+      }
+    }
+  }
+);
+
+// git_advanced — convert Claude schema shape → OpenAI function shape
+try {
+  const { GIT_ADVANCED_SCHEMA } = require('./git-advanced');
+  TOOLS.push({
+    type: 'function',
+    function: {
+      name: GIT_ADVANCED_SCHEMA.name,
+      description: GIT_ADVANCED_SCHEMA.description,
+      parameters: GIT_ADVANCED_SCHEMA.input_schema
+    }
+  });
+} catch { /* optional */ }
+
+// embedding-search — schemas da san dang OpenAI format
+try {
+  const { TOOL_SCHEMAS: EMBED_SCHEMAS } = require('./embedding-search');
+  TOOLS.push(...EMBED_SCHEMAS);
+} catch { /* optional */ }
+
+// screenshot — Windows-only
+if (process.platform === 'win32') {
+  TOOLS.push(
+    {
+      type: 'function',
+      function: {
+        name: 'capture_screen',
+        description: 'Chup man hinh Windows. Tra ve file path + base64 (data URL) de feed vision model. Chup full, monitor index, hoac region.',
+        parameters: {
+          type: 'object',
+          properties: {
+            monitor: { description: 'primary | all | index (0-based)', default: 'primary' },
+            region: {
+              type: 'object',
+              properties: {
+                x: { type: 'integer' }, y: { type: 'integer' },
+                width: { type: 'integer' }, height: { type: 'integer' }
+              }
+            },
+            format: { type: 'string', enum: ['png', 'jpg'], default: 'png' },
+            save_path: { type: 'string', description: 'Path luu file; mac dinh .orcai/screenshots/<ts>.png' },
+            return_base64: { type: 'boolean', default: true }
+          }
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'capture_window',
+        description: 'Chup 1 cua so cu the theo title (fuzzy match default). Auto-restore + foreground truoc khi chup.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            fuzzy: { type: 'boolean', default: true },
+            format: { type: 'string', enum: ['png', 'jpg'], default: 'png' },
+            save_path: { type: 'string' },
+            return_base64: { type: 'boolean', default: true }
+          },
+          required: ['title']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_monitors',
+        description: 'Liet ke monitor dang noi voi may — dimensions, primary flag, bounds.',
+        parameters: { type: 'object', properties: {} }
+      }
+    }
+  );
+}
+
 module.exports = { TOOLS, getTools, getToolsSummary };

@@ -28,6 +28,28 @@ const { spawnTeam } = require('./spawn-team');
 const { decomposeTask } = require('./task-decompose');
 const { bgList, bgOutput, bgKill } = require('./background-bash');
 
+// Windows-native tools (Phase 2) — lazy load, chi platform win32
+let WINDOWS_HANDLERS = {};
+if (process.platform === 'win32') {
+  try {
+    WINDOWS_HANDLERS = require('./windows').WINDOWS_HANDLERS || {};
+  } catch { /* optional */ }
+}
+
+// MCP slash commands (Phase 1) — luon co san
+let mcpCommands = null;
+try { mcpCommands = require('./mcp-commands'); } catch { /* optional */ }
+
+// Advanced tools (ast / git / screenshot / embedding)
+let AST = {};
+let GIT_ADV = null;
+let SHOT = {};
+let EMBED = null;
+try { AST = require('./ast-parse'); } catch { /* optional */ }
+try { GIT_ADV = require('./git-advanced'); } catch { /* optional */ }
+try { SHOT = require('./screenshot'); } catch { /* optional */ }
+try { EMBED = require('./embedding-search'); } catch { /* optional */ }
+
 class ToolExecutor {
   constructor(options = {}) {
     this.projectDir = options.projectDir || process.cwd();
@@ -130,7 +152,41 @@ class ToolExecutor {
         hermesBridge: this.hermesBridge,
         agentBus: this.agentBus
       }),
-      'task_complete':   (args) => this._handleTaskComplete(args)
+      'task_complete':   (args) => this._handleTaskComplete(args),
+      // AST refactor tools
+      'ast_parse':         (args) => AST.astParse ? AST.astParse(args) : { success: false, error: 'ast-parse module not loaded' },
+      'ast_find_symbol':   (args) => AST.astFindSymbol ? AST.astFindSymbol(args) : { success: false, error: 'ast-parse not loaded' },
+      'ast_find_usages':   (args) => AST.astFindUsages ? AST.astFindUsages(args) : { success: false, error: 'ast-parse not loaded' },
+      'ast_rename_symbol': (args) => AST.astRenameSymbol ? AST.astRenameSymbol(args) : { success: false, error: 'ast-parse not loaded' },
+      // Git structured ops
+      'git_advanced':      (args) => GIT_ADV ? GIT_ADV.gitAdvanced({ ...args, cwd: args.cwd || this.projectDir }) : { success: false, error: 'git-advanced not loaded' },
+      // Embedding semantic search (lazy init store)
+      'embed_index':       (args) => {
+        if (!EMBED) return { success: false, error: 'embedding-search not loaded' };
+        if (!this.embeddingStore) this.embeddingStore = EMBED.createEmbeddingStore({ projectDir: this.projectDir, endpoint: this.litellmUrl, apiKey: this.litellmKey });
+        return EMBED.embedIndex({ ...args, embeddingStore: this.embeddingStore, projectDir: this.projectDir });
+      },
+      'embed_search':      (args) => {
+        if (!EMBED) return { success: false, error: 'embedding-search not loaded' };
+        if (!this.embeddingStore) this.embeddingStore = EMBED.createEmbeddingStore({ projectDir: this.projectDir, endpoint: this.litellmUrl, apiKey: this.litellmKey });
+        return EMBED.embedSearch({ ...args, embeddingStore: this.embeddingStore });
+      },
+      'embed_stats':       () => {
+        if (!EMBED) return { success: false, error: 'embedding-search not loaded' };
+        if (!this.embeddingStore) this.embeddingStore = EMBED.createEmbeddingStore({ projectDir: this.projectDir, endpoint: this.litellmUrl, apiKey: this.litellmKey });
+        return EMBED.embedStats({ embeddingStore: this.embeddingStore });
+      },
+      'embed_clear':       (args) => {
+        if (!EMBED) return { success: false, error: 'embedding-search not loaded' };
+        if (!this.embeddingStore) this.embeddingStore = EMBED.createEmbeddingStore({ projectDir: this.projectDir, endpoint: this.litellmUrl, apiKey: this.litellmKey });
+        return EMBED.embedClear({ ...args, embeddingStore: this.embeddingStore });
+      },
+      // Screenshot (Windows)
+      'capture_screen':    (args) => SHOT.captureScreen ? SHOT.captureScreen(args) : { success: false, error: 'screenshot module not available' },
+      'capture_window':    (args) => SHOT.captureWindow ? SHOT.captureWindow(args) : { success: false, error: 'screenshot module not available' },
+      'list_monitors':     () => SHOT.listMonitors ? SHOT.listMonitors() : { success: false, error: 'screenshot module not available' },
+      // Windows-native handlers (Phase 2)
+      ...WINDOWS_HANDLERS
     };
 
     // Tracking: files đã thay đổi, commands đã chạy
