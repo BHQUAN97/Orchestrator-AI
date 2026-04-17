@@ -44,12 +44,15 @@ const { estimatePromptCost } = require('../lib/cost-estimate');
 const { loadClaudeMdHierarchy } = require('../lib/claude-md-loader');
 const { TranscriptLogger } = require('../lib/transcript-logger');
 const { renderTodos } = require('../tools/agent-todos');
+const { MemoryStore } = require('../lib/memory');
+const { ContextGuard, formatIssues } = require('../lib/context-guard');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
   'tokens', 'cost', 'budget', 'compact',
   'init', 'plan', 'mcp', 'cache',
   'doctor', 'todos', 'transcript', 'claudemd',
+  'memory', 'team', 'guard',
   'exit', 'quit', 'help'
 ];
 
@@ -88,6 +91,8 @@ program
   .option('--thinking-budget <tokens>', 'Extended thinking budget (default 8000)', '8000')
   .option('--no-thinking-auto', 'Disable auto-thinking for complex prompt keywords')
   .option('--no-transcript', 'Disable transcript logging to .orcai/transcripts/')
+  .option('--no-memory', 'Disable memory store (kinh nghiem tich luy giua session)')
+  .option('--no-context-guard', 'Disable anti-hallucination context guard')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
     const projectDir = path.resolve(opts.project);
@@ -142,6 +147,20 @@ program
     opts._approvalState = approvalState;
     opts._budget = budget;
     opts._hookRunner = hookRunner;
+
+    // Memory store (shared across subagents + runs)
+    if (opts.memory !== false) {
+      opts._memoryStore = new MemoryStore(projectDir);
+      const memStats = opts._memoryStore.getStats();
+      if (memStats.total > 0) {
+        console.log(chalk.gray(`  Memory: ${memStats.total} entries (${Object.entries(memStats.byType).map(([k, v]) => `${k}:${v}`).join(', ')})`));
+      }
+    }
+
+    // Context guard (anti-hallucination)
+    if (opts.contextGuard !== false) {
+      opts._contextGuard = new ContextGuard();
+    }
 
     // --doctor: run health check and exit
     if (opts.doctor) {
@@ -222,6 +241,20 @@ async function buildSystemPrompt(projectDir, role, opts = {}) {
     ? `\n\n=== CLAUDE.md (${claudeMdSources.length} file${claudeMdSources.length > 1 ? 's' : ''}) ===\n${claudeMd}\n=== END CLAUDE.md ===`
     : '';
 
+  // MCP routing hint — agent biet server nao co tools nao
+  let mcpHint = '';
+  if (opts._mcpRegistry) {
+    const mcpStats = opts._mcpRegistry.getStats();
+    if (mcpStats.servers > 0) {
+      const serverSummary = mcpStats.serverList.map(name => {
+        const client = opts._mcpRegistry.clients.get(name);
+        const sampleTools = (client?.tools || []).slice(0, 5).map(t => t.name).join(', ');
+        return `  - ${name}: ${sampleTools}${client?.tools?.length > 5 ? ` (+${client.tools.length - 5} more)` : ''}`;
+      }).join('\n');
+      mcpHint = `\n\n=== MCP Servers Available ===\n${serverSummary}\n\nKhi goi MCP tool dung ten day du: mcp__<server>__<tool>. Uu tien MCP neu task lien quan external service (github, playwright, docker, filesystem ngoai project, memory graph...)\n=== END MCP ===`;
+    }
+  }
+
   // Direct mode: skip repo scan cho prompt nho gon + nhanh (nhung VAN bao gom CLAUDE.md)
   if (opts.direct) {
     return `Ban la AI Coding Agent trong project "${projectName}" (${projectDir}).
@@ -233,7 +266,7 @@ Nguyen tac:
 - Dung edit_file cho sua nho, write_file cho file moi/ghi de
 - Verify bang execute_command (test, build, lint)
 - Goi task_complete voi summary ngan khi xong
-- Comment business logic tieng Viet, technical tieng Anh${claudeMdBlock}`;
+- Comment business logic tieng Viet, technical tieng Anh${claudeMdBlock}${mcpHint}`;
   }
 
   // Quét project structure — uu tien RepoCache (1hr TTL, invalidate theo git HEAD + package.json)
@@ -270,14 +303,18 @@ NGUYÊN TẮC:
 7. Comment business logic bằng tiếng Việt, technical bằng tiếng Anh
 8. Task doc lap, research sau → dung spawn_subagent de giu context parent sach
 9. Task > 3 step → dung todo_write de track progress (user thay list)
+10. Truoc task moi → memory_recall(query) de xem kinh nghiem cu co lien quan
+11. Phat hien bug/bay quan trong → memory_save(type: "gotcha", ...) de nho cho lan sau
+12. Task doc lap CO THE lam song song → spawn_team (max 5 agent parallel) thay vi tung spawn_subagent
 
 QUY TRÌNH:
-1. Đọc files liên quan (read_file, list_files, glob, search_files)
-2. Lập kế hoạch ngắn (trong đầu, không cần output)
-3. Thực hiện thay đổi (edit_file hoặc write_file)
-4. Verify (execute_command: chạy test, build, lint)
-5. Sửa nếu cần (self-correction loop)
-6. Gọi task_complete khi xong${claudeMdBlock}`;
+1. memory_recall(prompt) — xem kinh nghiem cu neu co
+2. Đọc files liên quan (read_file, list_files, glob, search_files)
+3. Lập kế hoạch ngắn (trong đầu, không cần output). Neu > 3 step → todo_write
+4. Thực hiện thay đổi (edit_file hoặc write_file hoac edit_files cho batch)
+5. Verify (execute_command: chạy test, build, lint)
+6. Sửa nếu cần (self-correction loop)
+7. Gọi task_complete khi xong (summary se duoc context-guard verify)${claudeMdBlock}${mcpHint}`;
 }
 
 // === Create Agent Loop với callbacks ===
@@ -304,6 +341,10 @@ function createAgent(projectDir, opts) {
     thinkingAuto: opts.thinkingAuto !== false,
     thinkingBudget: parseInt(opts.thinkingBudget || '8000'),
     transcriptLogger: opts._transcriptLogger || null,
+    memoryStore: opts._memoryStore || null,
+    memory: opts.memory !== false,
+    contextGuard: opts._contextGuard || null,
+    contextGuardEnabled: opts.contextGuard !== false,
 
     // Diff approval — chi hoi trong interactive mode + co TTY
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
@@ -704,6 +745,43 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
+    if (input === '/memory' || input.startsWith('/memory ')) {
+      const store = opts._memoryStore;
+      if (!store) { console.log(chalk.yellow('  Memory disabled.')); continue; }
+      const rest = input.slice('/memory'.length).trim();
+      if (rest === '' || rest === 'list') {
+        const stats = store.getStats();
+        console.log(chalk.gray(`  Memory: ${stats.total} entries | ${stats.path}`));
+        const recent = store.list({ limit: 10 });
+        for (const e of recent) {
+          const icon = e.type === 'gotcha' ? '⚠' : e.type === 'fact' ? 'ℹ' : '✓';
+          console.log(chalk.gray(`  ${icon} [${e.type}] ${(e.summary || '').slice(0, 80)}`));
+        }
+      } else if (rest.startsWith('search ')) {
+        const query = rest.slice(7);
+        const results = store.search(query, 10);
+        if (results.length === 0) console.log(chalk.gray('  No matches.'));
+        results.forEach(r => console.log(chalk.gray(`  [${r._score}] ${r.summary?.slice(0, 80)}`)));
+      } else if (rest === 'clear') {
+        store.clear();
+        console.log(chalk.yellow('  Memory cleared.'));
+      } else {
+        console.log(chalk.gray('  /memory [list|search <q>|clear]'));
+      }
+      continue;
+    }
+
+    if (input === '/guard') {
+      const g = opts._contextGuard;
+      if (!g) { console.log(chalk.yellow('  Context guard disabled.')); continue; }
+      const gt = g.getGroundTruth();
+      console.log(chalk.gray(`  Context guard — ground truth:`));
+      console.log(chalk.gray(`    files changed: ${gt.files_changed.length}`));
+      console.log(chalk.gray(`    files read:    ${gt.files_read.length}`));
+      console.log(chalk.gray(`    commands run:  ${gt.commands_count} (${gt.failed_commands} failed)`));
+      continue;
+    }
+
     if (input === '/doctor') {
       const results = await runDoctor({
         projectDir, litellmUrl: opts.url, litellmKey: opts.key,
@@ -797,6 +875,8 @@ async function interactiveMode(projectDir, opts) {
     /todos            — Hien danh sach todos cua agent
     /transcript       — Path den file transcript
     /claudemd         — Liet ke CLAUDE.md da load
+    /memory [q]       — Memory store (list | search | clear)
+    /guard            — Ground truth cua context guard
     /exit             — Thoat
     /help             — Hien help
 
@@ -855,6 +935,12 @@ ${formatCommandList(customCommands)}
 
     printResult(result);
     printCacheStats(agent);
+
+    // Context guard warnings
+    if (agent.contextGuard) {
+      const issues = agent.contextGuard.verify(result.summary || result.final_message || '').issues;
+      if (issues.length > 0) console.log(chalk.yellow(formatIssues(issues)));
+    }
 
     // Lưu session sau mỗi prompt
     cm.saveSession(session.id, {

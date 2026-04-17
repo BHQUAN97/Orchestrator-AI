@@ -22,6 +22,9 @@ const { spawnSubagent } = require('./subagent');
 const { askUserQuestion } = require('./ask-user');
 const { batchEdit } = require('./batch-edit');
 const { AgentTodoStore, todoWrite, todoList } = require('./agent-todos');
+const { memorySave, memoryRecall, memoryList } = require('./memory-tools');
+const { createSkill } = require('./create-skill');
+const { spawnTeam } = require('./spawn-team');
 
 class ToolExecutor {
   constructor(options = {}) {
@@ -46,6 +49,12 @@ class ToolExecutor {
     // Agent todo store (self-tracking during task)
     this.todoStore = new AgentTodoStore();
     this.onTodosUpdate = options.onTodosUpdate || null;
+
+    // Memory store (tich luy kinh nghiem giua session)
+    this.memoryStore = options.memoryStore || null;
+
+    // Context guard (chong ao giac)
+    this.contextGuard = options.contextGuard || null;
 
     // Diff approval callback — goi truoc write/edit trong interactive mode
     // Signature: (filePath, before, after) => 'yes' | 'no' | 'abort'
@@ -92,6 +101,19 @@ class ToolExecutor {
       'ask_user_question': async (args) => await askUserQuestion(args, { interactive: this.interactive }),
       'todo_write':      (args) => todoWrite(args, this.todoStore, this.onTodosUpdate),
       'todo_list':       (args) => todoList(args, this.todoStore),
+      'memory_save':     (args) => memorySave(args, this.memoryStore),
+      'memory_recall':   (args) => memoryRecall(args, this.memoryStore),
+      'memory_list':     (args) => memoryList(args, this.memoryStore),
+      'create_skill':    (args) => createSkill(args, this.projectDir),
+      'spawn_team':      (args) => spawnTeam(args, {
+        projectDir: this.projectDir,
+        litellmUrl: this.litellmUrl,
+        litellmKey: this.litellmKey,
+        parentDepth: this.subagentDepth,
+        budget: this.parentBudget,
+        hookRunner: this.parentHookRunner,
+        mcpRegistry: this.mcpRegistry
+      }),
       'task_complete':   (args) => this._handleTaskComplete(args)
     };
 
@@ -189,8 +211,16 @@ class ToolExecutor {
       if (['write_file', 'edit_file'].includes(name) && result.success) {
         this.filesChanged.add(result.path || args.path);
       }
+      if (name === 'edit_files' && result.success && Array.isArray(result.applied)) {
+        for (const a of result.applied) this.filesChanged.add(a.path);
+      }
       if (name === 'execute_command') {
         this.commandsRun.push({ command: args.command, exit_code: result.exit_code });
+      }
+
+      // Context guard: record ground truth for hallucination check
+      if (this.contextGuard) {
+        this.contextGuard.record(name, args, result);
       }
 
       // Log
@@ -289,7 +319,7 @@ class ToolExecutor {
    * Handler đặc biệt: task_complete — đánh dấu agent xong việc
    */
   _handleTaskComplete(args) {
-    return {
+    const baseResult = {
       success: true,
       completed: true,
       summary: args.summary,
@@ -297,6 +327,21 @@ class ToolExecutor {
       commands_run: this.commandsRun.length,
       total_tool_calls: this.history.length
     };
+
+    // Run context guard verification neu co
+    if (this.contextGuard && args.summary) {
+      const report = this.contextGuard.verify(args.summary);
+      if (report.issues.length > 0) {
+        baseResult.context_guard_warnings = report.issues;
+      }
+      baseResult.context_guard = {
+        verified: report.verified.length,
+        issues: report.issues.length,
+        ground_truth: report.ground_truth
+      };
+    }
+
+    return baseResult;
   }
 
   /**
@@ -308,6 +353,7 @@ class ToolExecutor {
     this.commandsRun = [];
     this.permissions.reset();
     this.todoStore.reset();
+    if (this.contextGuard) this.contextGuard.reset();
   }
 
   /**

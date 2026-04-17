@@ -752,6 +752,96 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(agent.thinkingBudget === 5000);
   });
 
+  // --- Memory system ---
+  test('MemoryStore appends + searches', () => {
+    const { MemoryStore } = require('../lib/memory');
+    const tmpDir = path.resolve(__dirname, '..');
+    const store = new MemoryStore(tmpDir);
+    store.clear();
+    try {
+      store.append({ type: 'lesson', summary: 'Fix JWT null check in auth middleware', keywords: ['jwt', 'auth', 'null', 'middleware'] });
+      store.append({ type: 'gotcha', summary: 'Database migration order matters for foreign keys', keywords: ['migration', 'db', 'foreign'] });
+      const results = store.search('auth jwt bug', 5);
+      assert(results.length > 0);
+      assert(results[0].summary.includes('JWT'), `expected JWT match, got: ${results[0].summary}`);
+    } finally {
+      store.clear();
+    }
+  });
+
+  test('memory_save tool def present', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('builder').map(t => t.function.name);
+    for (const n of ['memory_save', 'memory_recall', 'memory_list', 'create_skill', 'spawn_team']) {
+      assert(tools.includes(n), `missing tool: ${n}`);
+    }
+  });
+
+  // --- Context guard ---
+  test('ContextGuard detects unverified change claim', () => {
+    const { ContextGuard } = require('../lib/context-guard');
+    const g = new ContextGuard();
+    // Record an actual change to file A
+    g.record('write_file', { path: 'src/auth.ts' }, { content: JSON.stringify({ success: true, path: 'src/auth.ts' }) });
+    // Summary claims edits to BOTH auth.ts (real) AND unreal.ts (hallucinated)
+    const summary = 'Updated src/auth.ts to fix null check. Also modified src/unreal.ts for related bug.';
+    const report = g.verify(summary);
+    assert(report.issues.length > 0, 'should flag unreal.ts as unverified');
+    assert(report.issues.some(i => i.file?.includes('unreal')));
+    assert(report.verified.some(v => v.file?.includes('auth.ts')));
+  });
+
+  test('ContextGuard accepts verified changes', () => {
+    const { ContextGuard } = require('../lib/context-guard');
+    const g = new ContextGuard();
+    g.record('edit_file', { path: 'lib/foo.js' }, { content: JSON.stringify({ success: true, path: 'lib/foo.js' }) });
+    const report = g.verify('Edited lib/foo.js to add validation.');
+    assert(report.issues.length === 0, `expected no issues, got ${JSON.stringify(report.issues)}`);
+  });
+
+  // --- Skill creation ---
+  await test('createSkill writes valid markdown', async () => {
+    const { createSkill } = require('../tools/create-skill');
+    const projectDir = path.resolve(__dirname, '..');
+    const res = await createSkill({
+      name: 'test-parity-skill-xyz',
+      description: 'Test skill for parity',
+      body: 'This is a test skill body with $ARGUMENTS.',
+      trigger: 'test, parity',
+      location: 'claude'
+    }, projectDir);
+    try {
+      assert(res.success, res.error);
+      const skillPath = path.join(projectDir, res.path);
+      const content = fs.readFileSync(skillPath, 'utf-8');
+      assert(content.includes('description: Test skill for parity'));
+      assert(content.includes('$ARGUMENTS'));
+    } finally {
+      try { fs.unlinkSync(path.join(projectDir, res.path)); } catch {}
+    }
+  });
+
+  test('createSkill rejects invalid name', async () => {
+    const { createSkill } = require('../tools/create-skill');
+    const res = await createSkill({ name: 'bad name!', description: 'x', body: 'x'.repeat(20) }, path.resolve(__dirname, '..'));
+    assert(!res.success);
+  });
+
+  // --- Spawn team signature ---
+  test('spawn_team requires 2+ agents', async () => {
+    const { spawnTeam } = require('../tools/spawn-team');
+    const res = await spawnTeam({ agents: [] }, { projectDir: path.resolve(__dirname, '..') });
+    assert(!res.success);
+  });
+
+  // --- Executor wires memory + guard ---
+  test('AgentLoop wires memory + contextGuard into executor', () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({ projectDir: path.resolve(__dirname, '..') });
+    assert(agent.executor.memoryStore, 'executor.memoryStore not wired');
+    assert(agent.executor.contextGuard, 'executor.contextGuard not wired');
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

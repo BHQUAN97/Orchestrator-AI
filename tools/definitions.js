@@ -338,6 +338,111 @@ const TOOLS = [
     }
   },
 
+  // === MEMORY (tich luy kinh nghiem giua session) ===
+  {
+    type: 'function',
+    function: {
+      name: 'memory_save',
+      description: 'Luu lai lesson/fact/gotcha vao long-term memory. Dung khi phat hien pattern quan trong can nho cho session sau (vd: project convention la nay, bug thuong gap kia). Khong goi bua — chi khi kinh nghiem that su tai su dung duoc.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['lesson', 'gotcha', 'fact', 'manual'],
+            description: 'lesson: kinh nghiem thanh cong | gotcha: bay nen tranh | fact: su kien project | manual: ghi chu chung',
+            default: 'manual'
+          },
+          summary: { type: 'string', description: 'Tom tat ngan (1-2 cau)' },
+          details: { type: 'string', description: 'Chi tiet bo sung (optional, < 3000 chars)' },
+          keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords custom (optional — auto-extract neu khong cung cap)' }
+        },
+        required: ['summary']
+      }
+    }
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'memory_recall',
+      description: 'Tim kiem kinh nghiem cu co lien quan den task hien tai. Dung TRUOC khi bat dau task de xem co bai hoc cu khong.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Keywords/cau hoi can tim' },
+          limit: { type: 'integer', description: 'So ket qua top-K. Mac dinh 5', default: 5 }
+        },
+        required: ['query']
+      }
+    }
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'memory_list',
+      description: 'Liet ke memory entries moi nhat. Filter theo type neu can.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', default: 20 },
+          type: { type: 'string', enum: ['lesson', 'gotcha', 'fact', 'manual'], description: 'Filter theo type' }
+        }
+      }
+    }
+  },
+
+  // === SKILL CREATION ===
+  {
+    type: 'function',
+    function: {
+      name: 'create_skill',
+      description: 'Tao custom slash command moi (skill .md voi frontmatter). User goi /<name> sau do. Dung khi phat hien workflow lap lai co the dong goi.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Slash command name [a-zA-Z0-9_-], max 60 char. User goi /<name>' },
+          description: { type: 'string', description: 'Mo ta ngan ve skill' },
+          body: { type: 'string', description: 'Noi dung skill (markdown). Co the chua $ARGUMENTS de substitute user args' },
+          trigger: { type: 'string', description: 'Keywords trigger (comma-separated) de skill-matcher auto-suggest' },
+          argument_hint: { type: 'string', description: 'Hint format cho user, vd "<file-path>"' },
+          location: { type: 'string', enum: ['claude', 'skills'], default: 'claude', description: 'claude: .claude/commands/ (recommended) | skills: skills/' }
+        },
+        required: ['name', 'description', 'body']
+      }
+    }
+  },
+
+  // === AGENT TEAM (parallel subagents) ===
+  {
+    type: 'function',
+    function: {
+      name: 'spawn_team',
+      description: 'Chay 2-5 subagent SONG SONG voi role khac nhau, merge ket qua. Dung khi task co nhieu phan doc lap (explore FE + BE cung luc, review security + performance cung luc). Tiet kiem thoi gian so voi goi spawn_subagent tuan tu.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agents: {
+            type: 'array',
+            description: 'Array 2-5 agent. Moi agent: {description, prompt, subagent_type?}',
+            minItems: 2, maxItems: 5,
+            items: {
+              type: 'object',
+              properties: {
+                description: { type: 'string', description: 'Mo ta ngan role cua agent' },
+                prompt: { type: 'string', description: 'Task chi tiet — self-contained' },
+                subagent_type: { type: 'string', enum: ['general-purpose', 'explore', 'plan', 'review', 'debug'], default: 'general-purpose' }
+              },
+              required: ['description', 'prompt']
+            }
+          }
+        },
+        required: ['agents']
+      }
+    }
+  },
+
   // === AGENT SELF-TRACKING ===
   {
     type: 'function',
