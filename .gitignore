@@ -31,3 +31,15 @@ node_modules/
 
 # SDD decisions (có thể chứa context nhạy cảm)
 .sdd/decisions.lock.json
+
+# Secrets - managed by secrets-infra
+.env
+.env.local
+.env.*.local
+.env.prod
+.env.staging
+.env.production
+secrets/*.decrypted
+# Chi commit ban encrypted (.enc) va template (.example)
+!.env.example
+!.env.*.enc

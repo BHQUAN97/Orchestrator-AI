@@ -1,0 +1,7 @@
+# Auto-generated boi secrets-infra
+# Public age key - ai co private key tuong ung moi decrypt duoc
+creation_rules:
+  - path_regex: \.env\.(prod|staging|production)(\.enc)?$
+    age: age1vkqa8eptl6mntzwfs6k8dekl8qwlzls8rzzszwwsqwx8kxeedvuqfvhnz8
+  - path_regex: secrets/.*\.(yaml|json|env)$
+    age: age1vkqa8eptl6mntzwfs6k8dekl8qwlzls8rzzszwwsqwx8kxeedvuqfvhnz8
