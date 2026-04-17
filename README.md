@@ -327,6 +327,19 @@ curl -X POST http://localhost:5003/api/vision \
   }'
 # Response: { success, analysis, model, tokens, elapsed_ms, budget }
 # Constraints: max 4 images, 5MB/image, format jpeg/png/webp/gif
+
+# === Vision + Run combo — phan tich anh + tu dong sua code ===
+# Step 1: vision analyze → Step 2: orchestrator.run() voi enriched prompt
+curl -X POST http://localhost:5003/api/vision-run \
+  -d '{"prompt":"Fix bug trong screenshot","files":["src/Login.tsx"],
+       "images":["data:image/jpeg;base64,..."],"project":"FashionEcom"}'
+# Hoac dry-run de chi xem plan: them "dry": true
+
+# === GitHub auto-PR (yeu cau GH_TOKEN env) ===
+curl -X POST http://localhost:5003/api/pr \
+  -d '{"project":"FashionEcom","base":"main"}'
+# Tu lay title tu last commit, body tu commit list. Tu git push -u origin.
+# Refuse PR khi current branch = main/master.
 ```
 
 ### Environment variables (v2.2 mới)
@@ -340,6 +353,7 @@ curl -X POST http://localhost:5003/api/vision \
 | `NOTIFY_WEBHOOK_URL` | — | Slack/Discord webhook khi run complete + rollback |
 | `AUTH_USERNAME/PASSWORD/JWT_SECRET` | (admin/admin/dev) | Production REQUIRES set, không dùng default |
 | `VISION_MAX_TOKENS` | `2000` | Max tokens cho vision response (giảm nếu hết credit) |
+| `GH_TOKEN` | — | GitHub Personal Access Token cho `/api/pr` (gh CLI auth) |
 
 ### Via LiteLLM API directly
 

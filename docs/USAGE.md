@@ -463,6 +463,114 @@ Sections:
 
 Voice input: Chrome/Edge native SpeechRecognition (free, no backend setup).
 
+---
+
+## 9. Vision — phan tich anh (v2.2)
+
+### 9.1 Vision text-only — `POST /api/vision`
+
+Phan tich screenshot UI bug, diagram, error message... KHONG sua code.
+
+```bash
+curl -X POST http://localhost:5003/api/vision \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Anh nay co bug gi?",
+    "images": ["data:image/jpeg;base64,..."]
+  }'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "analysis": "Hình có chữ \"RED\" trên nền đỏ...",
+  "model": "fast",
+  "tokens": 1191,
+  "elapsed_ms": 3000,
+  "budget": { "spent": "$0.0004", "remaining": "$1.9996" }
+}
+```
+
+Constraints: max 4 anh, 5MB/anh, format jpeg/png/webp/gif.
+Models support: `fast` (Gemini 3 Flash), `smart` (Sonnet 4.6), `architect` (Opus).
+Auto-upgrade neu chon model khong vision-capable.
+
+### 9.2 Vision + Run combo — `POST /api/vision-run`
+
+Vision phan tich → enriched prompt → full pipeline tu sua code.
+Use case mobile: chup screenshot bug → tu mota + tu sua.
+
+```bash
+curl -X POST http://localhost:5003/api/vision-run \
+  -d '{
+    "prompt": "Sua bug nay",
+    "images": ["data:image/jpeg;base64,..."],
+    "files": ["src/Login.tsx"],
+    "project": "FashionEcom",
+    "task": "fix",
+    "dry": false
+  }'
+```
+
+Response combine vision + pipeline:
+```json
+{
+  "success": true,
+  "vision": { "analysis": "...", "tokens": 1373, "elapsed_ms": 4336 },
+  "run": {
+    "summary": "Da sua font-size 16px → 32px",
+    "subtasks": 1,
+    "trace": { "timeline": "Classifier → Scanner → ..." }
+  },
+  "budget": { "spent": "$0.0050" }
+}
+```
+
+Cost: vision (~$0.0004) + run (~$0.005) = ~$0.0054/task. Latency ~80-90s full.
+
+### 9.3 Portal upload (recommended)
+
+`http://localhost:5005/portal` → click 🖼️ Image → chon anh →
+- 👁️ Vision: chi phan tich (KHONG sua code)
+- 👁️▶️ Vision+Run: phan tich + tu dong sua (full pipeline)
+
+Client tu resize <2048px, JPEG q85. Max 4 anh.
+
+---
+
+## 10. GitHub auto-PR — `POST /api/pr` (v2.2)
+
+Yeu cau `GH_TOKEN` env trong docker-compose:
+```yaml
+environment:
+  - GH_TOKEN=${GH_TOKEN}
+```
+
+Voi `.env`:
+```
+GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
+
+Then:
+```bash
+curl -X POST http://localhost:5003/api/pr \
+  -d '{
+    "project": "FashionEcom",
+    "title": "Optional title (default: last commit subject)",
+    "body": "Optional body (default: commit list base..HEAD)",
+    "base": "main"
+  }'
+```
+
+Response: `{ success, pr_url, branch, base, title }`.
+
+Behavior:
+- Refuse PR khi current branch = `main` / `master` (an toan).
+- Tu `git push -u origin <branch>` truoc khi tao PR.
+- Auto title: last commit subject neu khong dua.
+- Auto body: `git log base..HEAD --format="- %s"`.
+
 Response:
 ```json
 {

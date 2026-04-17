@@ -4,13 +4,13 @@
 
 ## What's New v2.2 (2026-04-17)
 
-12 commit hardening + perf + features. Highlights:
+15 commit hardening + perf + features. Highlights:
 - **Security**: gateway auth hardening, prod startup guard, removed hardcoded LiteLLM key, SameSite=Strict, CSRF protection
 - **Reliability**: budget refund on retry exhausted, Architect ceiling break (chan $0.13 waste/task), batch I/O cho decision-lock, LiteLLM timeout 90s + retry network err
 - **Performance**: parallel classify+scan (~500ms), ContextManager meta cache (~1s/run), ring buffer executionLog (chan RAM leak), incremental getStats O(1), JSON parse fast-path 7.6×
-- **Features (10 endpoints moi)**: dry-run, cancel, rollback, history, estimate (heuristic), templates CRUD, runs, SSE live stream, voice input portal, NOTIFY_WEBHOOK
+- **Features (12 endpoints moi)**: dry-run, cancel, rollback, history, estimate (heuristic), templates CRUD, runs, SSE live stream, voice input portal, NOTIFY_WEBHOOK, **vision (multi-modal Gemini 3 Flash)**, **vision-run combo**, **GitHub auto-PR**
 - **Real-test fix**: git in alpine, BUDGET_TZ override, LiteLLM healthcheck endpoint, credit-aware auto-downgrade
-- **Tests**: 99 unit + 56 hardening = 155 pass
+- **Tests**: 99 unit + 65 hardening = 164 pass
 
 ---
 
