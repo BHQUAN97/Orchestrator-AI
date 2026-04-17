@@ -11,14 +11,31 @@
  *   → trả Array<{tool_call_id, role: 'tool', content: JSON}>
  */
 
+const fs = require('fs');
+const path = require('path');
 const { FileManager } = require('./file-manager');
 const { TerminalRunner } = require('./terminal-runner');
 const { ToolPermissions } = require('./permissions');
+const { webFetch, webSearch } = require('./web-tools');
+const { glob } = require('./glob-tool');
+const { spawnSubagent } = require('./subagent');
 
 class ToolExecutor {
   constructor(options = {}) {
     this.projectDir = options.projectDir || process.cwd();
     this.agentRole = options.agentRole || 'builder';
+
+    // Context can cho subagent goi lai AgentLoop
+    this.litellmUrl = options.litellmUrl || process.env.LITELLM_URL || 'http://localhost:4001';
+    this.litellmKey = options.litellmKey || process.env.LITELLM_KEY || 'sk-master-change-me';
+    this.subagentDepth = options.subagentDepth || 0;
+
+    // MCP registry (optional)
+    this.mcpRegistry = options.mcpRegistry || null;
+
+    // Diff approval callback — goi truoc write/edit trong interactive mode
+    // Signature: (filePath, before, after) => 'yes' | 'no' | 'abort'
+    this.onWriteApproval = options.onWriteApproval || null;
 
     this.fileManager = new FileManager({
       projectDir: this.projectDir,
@@ -40,14 +57,24 @@ class ToolExecutor {
       'edit_file':       (args) => this.fileManager.editFile(args),
       'list_files':      (args) => this.fileManager.listFiles(args),
       'search_files':    (args) => this.fileManager.searchFiles(args),
-      'execute_command':  (args) => this.terminalRunner.executeCommand(args),
-      'task_complete':    (args) => this._handleTaskComplete(args)
+      'glob':            (args) => glob(args, this.projectDir),
+      'execute_command': (args) => this.terminalRunner.executeCommand(args),
+      'web_fetch':       (args) => webFetch(args),
+      'web_search':      (args) => webSearch(args),
+      'spawn_subagent':  (args) => spawnSubagent(args, {
+        projectDir: this.projectDir,
+        litellmUrl: this.litellmUrl,
+        litellmKey: this.litellmKey,
+        parentDepth: this.subagentDepth
+      }),
+      'task_complete':   (args) => this._handleTaskComplete(args)
     };
 
     // Tracking: files đã thay đổi, commands đã chạy
     this.history = [];
     this.filesChanged = new Set();
     this.commandsRun = [];
+    this.userAborted = false;
   }
 
   /**
@@ -71,6 +98,24 @@ class ToolExecutor {
       });
     }
 
+    // Dispatch MCP tools qua registry
+    if (name.startsWith('mcp__') && this.mcpRegistry) {
+      // Permissions: chi cho role level execute/write (da check trong permissions.check)
+      const permCheck = this.permissions.check(name, args);
+      if (!permCheck.allowed) {
+        return this._formatResult(id, name, { success: false, error: `PERMISSION DENIED: ${permCheck.reason}` });
+      }
+      this.permissions.recordCall(name);
+      try {
+        const result = await this.mcpRegistry.callTool(name, args);
+        const elapsed = Date.now() - startTime;
+        this.history.push({ id, name, args, success: result.success, elapsed_ms: elapsed, timestamp: new Date().toISOString() });
+        return this._formatResult(id, name, result);
+      } catch (e) {
+        return this._formatResult(id, name, { success: false, error: `MCP error: ${e.message}` });
+      }
+    }
+
     // Tìm handler
     const handler = this.handlers[name];
     if (!handler) {
@@ -87,6 +132,24 @@ class ToolExecutor {
         success: false,
         error: `PERMISSION DENIED: ${permCheck.reason}`
       });
+    }
+
+    // Diff approval — goi truoc khi write/edit (chi trong interactive mode)
+    if (this.onWriteApproval && ['write_file', 'edit_file'].includes(name)) {
+      const approval = await this._askWriteApproval(name, args);
+      if (approval === 'abort') {
+        this.userAborted = true;
+        return this._formatResult(id, name, {
+          success: false,
+          error: 'USER_ABORTED: Agent aborted by user via diff approval'
+        });
+      }
+      if (approval === 'no') {
+        return this._formatResult(id, name, {
+          success: false,
+          error: 'User declined this change. Try a different approach or ask user for clarification.'
+        });
+      }
     }
 
     // Ghi nhan vao permission counter TRUOC khi execute — dem ca success va fail de rate limit
@@ -119,6 +182,38 @@ class ToolExecutor {
         success: false,
         error: `Runtime error: ${e.message}`
       });
+    }
+  }
+
+  /**
+   * Tinh toan before/after cho diff, goi onWriteApproval callback
+   */
+  async _askWriteApproval(toolName, args) {
+    try {
+      const fullPath = path.isAbsolute(args.path)
+        ? args.path
+        : path.resolve(this.projectDir, args.path);
+      const before = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : null;
+
+      let after;
+      if (toolName === 'write_file') {
+        after = args.content;
+      } else {
+        // edit_file — simulate replacement to compute after-content
+        if (!before) return 'yes'; // file missing, let handler error naturally
+        if (!before.includes(args.old_string)) return 'yes'; // old_string not found, handler errors
+        after = args.replace_all
+          ? before.split(args.old_string).join(args.new_string)
+          : before.replace(args.old_string, args.new_string);
+      }
+
+      // No change? No need to ask
+      if (before === after) return 'yes';
+
+      return await this.onWriteApproval(args.path, before, after);
+    } catch {
+      // On any error computing diff, default to allow (safer than blocking)
+      return 'yes';
     }
   }
 

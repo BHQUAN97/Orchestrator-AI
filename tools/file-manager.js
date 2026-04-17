@@ -21,11 +21,37 @@ const IGNORE_PATTERNS = [
   '**/coverage/**', '**/.turbo/**', '**/vendor/**'
 ];
 
-// File nhạy cảm — chặn đọc ngay cả trong project dir
+// File nhạy cảm — chặn đọc/ghi ngay cả trong project dir
+// (mo rong: ssh keys, cloud creds, package manager tokens)
 const SENSITIVE_FILE_PATTERNS = [
-  '.env', '.env.local', '.env.production', '.env.staging', '.env.development'
+  '.env', '.env.local', '.env.production', '.env.staging', '.env.development', '.env.test',
+  'id_rsa', 'id_dsa', 'id_ed25519', 'id_ecdsa',
+  '.npmrc', '.pypirc', '.netrc', '_netrc', '.htpasswd',
+  'master.key', 'secret_key_base.key'
 ];
-const SENSITIVE_EXT = ['.key', '.pem'];
+const SENSITIVE_EXT = ['.key', '.pem', '.pfx', '.p12', '.pkcs12', '.jks', '.asc'];
+// Path patterns — match full resolved path (Windows + Unix)
+const SENSITIVE_PATH_PATTERNS = [
+  /[\/\\]\.ssh[\/\\][^\/\\]/,                    // .ssh/<any>
+  /[\/\\]\.aws[\/\\](credentials|config)$/i,      // .aws/credentials
+  /[\/\\]\.gcp[\/\\]/i,                           // .gcp/*
+  /[\/\\]\.azure[\/\\]/i,                         // .azure/*
+  /[\/\\]\.docker[\/\\]config\.json$/i,           // .docker/config.json
+  /[\/\\]\.kube[\/\\]config$/i,                   // .kube/config
+  /[\/\\]gcloud[\/\\](legacy_)?credentials/i,     // gcloud creds
+  /[\/\\]secrets?[\/\\].+\.(json|ya?ml|txt|env)$/i // secrets/*.{json,yaml,yml,txt,env}
+];
+
+function isSensitivePath(resolved) {
+  const basename = path.basename(resolved);
+  const ext = path.extname(resolved).toLowerCase();
+  if (SENSITIVE_FILE_PATTERNS.includes(basename)) return `Sensitive filename: ${basename}`;
+  if (SENSITIVE_EXT.includes(ext)) return `Sensitive extension: ${ext}`;
+  for (const pat of SENSITIVE_PATH_PATTERNS) {
+    if (pat.test(resolved)) return `Sensitive path pattern: ${pat.source}`;
+  }
+  return null;
+}
 
 class FileManager {
   constructor(options = {}) {
@@ -73,14 +99,9 @@ class FileManager {
     }
 
     // Chặn file nhạy cảm — ngay cả trong project dir
-    const basename = path.basename(resolved);
-    const ext = path.extname(resolved).toLowerCase();
-
-    if (SENSITIVE_FILE_PATTERNS.includes(basename)) {
-      throw new Error(`BLOCKED: Không được đọc file ${basename} — chứa secrets.`);
-    }
-    if (SENSITIVE_EXT.includes(ext)) {
-      throw new Error(`BLOCKED: Không được đọc file *${ext} — chứa credentials/keys.`);
+    const reason = isSensitivePath(resolved);
+    if (reason) {
+      throw new Error(`BLOCKED: Không được đọc file nhạy cảm — ${reason}`);
     }
 
     return resolved;
@@ -95,14 +116,10 @@ class FileManager {
       throw new Error(`BLOCKED: Không được ghi file ngoài project directory.\nPath: ${resolved}\nProject: ${projectNorm}`);
     }
 
-    // Chặn ghi vào file nhạy cảm — dong bo voi SENSITIVE_FILE_PATTERNS
-    const basename = path.basename(resolved);
-    const ext = path.extname(resolved).toLowerCase();
-    if (SENSITIVE_FILE_PATTERNS.includes(basename)) {
-      throw new Error(`BLOCKED: Không được ghi file ${basename} — chứa secrets.`);
-    }
-    if (SENSITIVE_EXT.includes(ext)) {
-      throw new Error(`BLOCKED: Không được ghi file *${ext} — chứa credentials/keys.`);
+    // Chặn ghi vào file nhạy cảm
+    const reason = isSensitivePath(resolved);
+    if (reason) {
+      throw new Error(`BLOCKED: Không được ghi file nhạy cảm — ${reason}`);
     }
 
     return resolved;

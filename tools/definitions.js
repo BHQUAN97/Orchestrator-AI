@@ -154,6 +154,81 @@ const TOOLS = [
     }
   },
 
+  {
+    type: 'function',
+    function: {
+      name: 'glob',
+      description: 'Tim file theo glob pattern nhanh (fast-glob). Tra ve files sap xep theo mtime desc (moi nhat truoc). Tot hon list_files cho case "tim tat ca *.ts", khong gioi han do sau.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            description: 'Glob pattern. VD: "**/*.ts", "src/**/*.{js,jsx}", "tests/**/*.test.*"'
+          },
+          path: {
+            type: 'string',
+            description: 'Thu muc goc de glob. Mac dinh project root.',
+            default: '.'
+          },
+          max_results: {
+            type: 'integer',
+            description: 'So file toi da. Mac dinh 100.',
+            default: 100
+          }
+        },
+        required: ['pattern']
+      }
+    }
+  },
+
+  // === NETWORK / WEB ===
+  {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
+      description: 'Fetch URL (GET) va extract text (strip HTML). Dung doc API docs, blog, release notes. Timeout 15s, content truncate 50KB.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'URL (http/https). Khong chap nhan file://, javascript:, data:.'
+          },
+          max_length: {
+            type: 'integer',
+            description: 'Max chars content tra ve. Mac dinh 50000.',
+            default: 50000
+          }
+        },
+        required: ['url']
+      }
+    }
+  },
+
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Tim kiem web. Uu tien Brave API (neu BRAVE_API_KEY), fallback DuckDuckGo HTML. Tra ve title + url + description.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Tu khoa tim kiem'
+          },
+          max_results: {
+            type: 'integer',
+            description: 'So ket qua toi da. Mac dinh 5.',
+            default: 5
+          }
+        },
+        required: ['query']
+      }
+    }
+  },
+
   // === TERMINAL ===
   {
     type: 'function',
@@ -178,6 +253,35 @@ const TOOLS = [
           }
         },
         required: ['command']
+      }
+    }
+  },
+
+  // === SUBAGENT ===
+  {
+    type: 'function',
+    function: {
+      name: 'spawn_subagent',
+      description: 'Spawn child agent voi context rieng de lam 1 task doc lap. Child chi tra ve summary → giu parent context sach. Dung cho: explore (tim file), plan (thiet ke), review (kiem tra), debug (tim bug).',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description: 'Mo ta ngan (3-5 tu) ve task'
+          },
+          prompt: {
+            type: 'string',
+            description: 'Task chi tiet cho subagent — self-contained (subagent KHONG thay conversation hien tai)'
+          },
+          subagent_type: {
+            type: 'string',
+            enum: ['general-purpose', 'explore', 'plan', 'review', 'debug'],
+            description: 'Loai subagent. explore=fast+scanner, plan=smart+planner, review=fast+reviewer, debug=smart+debugger',
+            default: 'general-purpose'
+          }
+        },
+        required: ['description', 'prompt']
       }
     }
   },
