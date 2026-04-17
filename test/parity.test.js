@@ -842,6 +842,60 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(agent.executor.contextGuard, 'executor.contextGuard not wired');
   });
 
+  // --- Hermes Bridge ---
+  test('HermesBridge wraps SmartRouter + DecisionLock', () => {
+    const { HermesBridge } = require('../lib/hermes-bridge');
+    const bridge = new HermesBridge({ projectDir: path.resolve(__dirname, '..') });
+    assert(bridge.smartRouter, 'smart router missing');
+    assert(bridge.decisionLock, 'decision lock missing');
+    const locks = bridge.getActiveLocks();
+    assert(Array.isArray(locks));
+  });
+
+  await test('HermesBridge.selectModel returns heuristic decision', async () => {
+    const { HermesBridge } = require('../lib/hermes-bridge');
+    const bridge = new HermesBridge({ projectDir: path.resolve(__dirname, '..') });
+    const d = await bridge.selectModel({
+      task: 'fix',
+      prompt: 'Fix the React login component styling',
+      files: ['src/components/Login.tsx']
+    });
+    assert(d.method === 'heuristic');
+    assert(typeof d.model === 'string' && d.model.length > 0);
+  });
+
+  test('HermesBridge.checkFilePath returns empty when no locks', () => {
+    const { HermesBridge } = require('../lib/hermes-bridge');
+    const bridge = new HermesBridge({ projectDir: '/tmp/no-locks-xyz-' + Date.now() });
+    const blocks = bridge.checkFilePath('src/foo.ts');
+    assert(Array.isArray(blocks));
+    assert(blocks.length === 0);
+  });
+
+  test('AgentLoop wires HermesBridge', () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({ projectDir: path.resolve(__dirname, '..') });
+    assert(agent.hermesBridge, 'hermesBridge not wired');
+    assert(agent.executor.hermesBridge === agent.hermesBridge);
+  });
+
+  // --- Task decomposition ---
+  test('decompose_task + hermes tools in builder list', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('builder').map(t => t.function.name);
+    assert(tools.includes('decompose_task'));
+  });
+
+  await test('decompose_task returns error without classifier', async () => {
+    const { decomposeTask } = require('../tools/task-decompose');
+    const res = await decomposeTask(
+      { prompt: 'refactor auth module' },
+      { hermesBridge: { classifier: null } }
+    );
+    assert(!res.success);
+    assert(res.error.includes('Classifier'));
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

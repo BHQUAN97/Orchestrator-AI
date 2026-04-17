@@ -331,6 +331,11 @@ const TOOLS = [
             enum: ['general-purpose', 'explore', 'plan', 'review', 'debug'],
             description: 'Loai subagent. explore=fast+scanner, plan=smart+planner, review=fast+reviewer, debug=smart+debugger',
             default: 'general-purpose'
+          },
+          auto_model: {
+            type: 'boolean',
+            description: 'Dung Hermes SmartRouter de chon model toi uu thay vi profile default. Mac dinh false.',
+            default: false
           }
         },
         required: ['description', 'prompt']
@@ -410,6 +415,22 @@ const TOOLS = [
           location: { type: 'string', enum: ['claude', 'skills'], default: 'claude', description: 'claude: .claude/commands/ (recommended) | skills: skills/' }
         },
         required: ['name', 'description', 'body']
+      }
+    }
+  },
+
+  // === TASK DECOMPOSITION (Hermes classifier) ===
+  {
+    type: 'function',
+    function: {
+      name: 'decompose_task',
+      description: 'Phan tich task + goi y decomposition qua SLMClassifier. Tra ve classification (intent/complexity/domain), suggested_model (SmartRouter), va decomposition hint (co nen spawn_team khong). Dung TRUOC task phuc tap de lap ke hoach.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Task description de classify' }
+        },
+        required: ['prompt']
       }
     }
   },

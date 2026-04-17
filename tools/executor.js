@@ -25,6 +25,7 @@ const { AgentTodoStore, todoWrite, todoList } = require('./agent-todos');
 const { memorySave, memoryRecall, memoryList } = require('./memory-tools');
 const { createSkill } = require('./create-skill');
 const { spawnTeam } = require('./spawn-team');
+const { decomposeTask } = require('./task-decompose');
 
 class ToolExecutor {
   constructor(options = {}) {
@@ -55,6 +56,9 @@ class ToolExecutor {
 
     // Context guard (chong ao giac)
     this.contextGuard = options.contextGuard || null;
+
+    // Hermes bridge (SmartRouter + DecisionLock)
+    this.hermesBridge = options.hermesBridge || null;
 
     // Diff approval callback — goi truoc write/edit trong interactive mode
     // Signature: (filePath, before, after) => 'yes' | 'no' | 'abort'
@@ -92,8 +96,10 @@ class ToolExecutor {
         parentDepth: this.subagentDepth,
         budget: this.parentBudget,         // share parent budget cap
         hookRunner: this.parentHookRunner, // share parent hook runner
-        mcpRegistry: this.mcpRegistry      // share MCP
+        mcpRegistry: this.mcpRegistry,     // share MCP
+        hermesBridge: this.hermesBridge    // share Hermes (SmartRouter + DecisionLock)
       }),
+      'decompose_task':  (args) => decomposeTask(args, { hermesBridge: this.hermesBridge }),
       'read_mcp_resource': async (args) => {
         if (!this.mcpRegistry) return { success: false, error: 'No MCP registry configured' };
         return await this.mcpRegistry.readResource(args.server, args.uri);
@@ -112,7 +118,8 @@ class ToolExecutor {
         parentDepth: this.subagentDepth,
         budget: this.parentBudget,
         hookRunner: this.parentHookRunner,
-        mcpRegistry: this.mcpRegistry
+        mcpRegistry: this.mcpRegistry,
+        hermesBridge: this.hermesBridge
       }),
       'task_complete':   (args) => this._handleTaskComplete(args)
     };
@@ -179,6 +186,23 @@ class ToolExecutor {
         success: false,
         error: `PERMISSION DENIED: ${permCheck.reason}`
       });
+    }
+
+    // Decision lock check — truoc khi write/edit/edit_files
+    if (this.hermesBridge && ['write_file', 'edit_file', 'edit_files'].includes(name)) {
+      const paths = name === 'edit_files'
+        ? (Array.isArray(args.edits) ? args.edits.map(e => e.path) : [])
+        : [args.path];
+      for (const p of paths.filter(Boolean)) {
+        const blocks = this.hermesBridge.checkFilePath(p);
+        if (blocks.length > 0) {
+          return this._formatResult(id, name, {
+            success: false,
+            error: `LOCKED: File "${p}" is in locked decision scope "${blocks[0].scope}": ${blocks[0].decision}. Escalate to user via ask_user_question to unlock, or pick different approach.`,
+            locked_by: blocks.map(b => ({ scope: b.scope, decision: b.decision, approvedBy: b.approvedBy }))
+          });
+        }
+      }
     }
 
     // Diff approval — goi truoc khi write/edit (chi trong interactive mode)

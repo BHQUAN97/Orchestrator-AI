@@ -46,13 +46,14 @@ const { TranscriptLogger } = require('../lib/transcript-logger');
 const { renderTodos } = require('../tools/agent-todos');
 const { MemoryStore } = require('../lib/memory');
 const { ContextGuard, formatIssues } = require('../lib/context-guard');
+const { HermesBridge } = require('../lib/hermes-bridge');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
   'tokens', 'cost', 'budget', 'compact',
   'init', 'plan', 'mcp', 'cache',
   'doctor', 'todos', 'transcript', 'claudemd',
-  'memory', 'team', 'guard',
+  'memory', 'team', 'guard', 'route', 'locks',
   'exit', 'quit', 'help'
 ];
 
@@ -93,6 +94,9 @@ program
   .option('--no-transcript', 'Disable transcript logging to .orcai/transcripts/')
   .option('--no-memory', 'Disable memory store (kinh nghiem tich luy giua session)')
   .option('--no-context-guard', 'Disable anti-hallucination context guard')
+  .option('--auto-route', 'Auto-select model per task using Hermes SmartRouter')
+  .option('--use-classifier', 'Use LLM classifier for routing (more accurate, costs ~$0.0001/call)')
+  .option('--no-hermes', 'Disable Hermes bridge (SmartRouter + DecisionLock)')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
     const projectDir = path.resolve(opts.project);
@@ -160,6 +164,23 @@ program
     // Context guard (anti-hallucination)
     if (opts.contextGuard !== false) {
       opts._contextGuard = new ContextGuard();
+    }
+
+    // Hermes bridge (SmartRouter + DecisionLock + classifier)
+    if (opts.hermes !== false) {
+      opts._hermesBridge = new HermesBridge({
+        projectDir,
+        litellmUrl: opts.url,
+        litellmKey: opts.key,
+        useClassifier: !!opts.useClassifier
+      });
+      const activeLocks = opts._hermesBridge.getActiveLocks();
+      if (activeLocks.length > 0) {
+        console.log(chalk.yellow(`  🔒 Decision locks: ${activeLocks.length} active — /locks to list`));
+      }
+      if (opts.autoRoute) {
+        console.log(chalk.gray('  Auto-route: on (per-task model selection via SmartRouter)'));
+      }
     }
 
     // --doctor: run health check and exit
@@ -345,6 +366,10 @@ function createAgent(projectDir, opts) {
     memory: opts.memory !== false,
     contextGuard: opts._contextGuard || null,
     contextGuardEnabled: opts.contextGuard !== false,
+    hermesBridge: opts._hermesBridge || null,
+    hermes: opts.hermes !== false,
+    autoRoute: !!opts.autoRoute,
+    useClassifier: !!opts.useClassifier,
 
     // Diff approval — chi hoi trong interactive mode + co TTY
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
@@ -782,6 +807,36 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
+    if (input === '/route') {
+      if (!opts._hermesBridge) { console.log(chalk.yellow('  Hermes disabled.')); continue; }
+      const history = opts._hermesBridge.getRoutingHistory(5);
+      if (history.length === 0) {
+        console.log(chalk.gray('  No routing decisions yet. Enable --auto-route to see decisions.'));
+      } else {
+        console.log(chalk.gray('  Last routing decisions:'));
+        for (const h of history) {
+          console.log(chalk.gray(`    → ${h.decision.model} (${h.decision.method}) — ${(h.decision.reasons || []).slice(0, 3).join(', ').slice(0, 80)}`));
+        }
+      }
+      continue;
+    }
+
+    if (input === '/locks') {
+      if (!opts._hermesBridge) { console.log(chalk.yellow('  Hermes disabled.')); continue; }
+      const locks = opts._hermesBridge.getActiveLocks();
+      if (locks.length === 0) {
+        console.log(chalk.gray('  No active decision locks.'));
+      } else {
+        console.log(chalk.gray(`  ${locks.length} active lock(s):`));
+        for (const d of locks) {
+          console.log(chalk.yellow(`    🔒 [${d.scope}] ${d.decision}`));
+          if (d.approvedBy) console.log(chalk.gray(`       by ${d.approvedBy} at ${d.lockedAt}`));
+          if (d.relatedFiles?.length) console.log(chalk.gray(`       files: ${d.relatedFiles.slice(0, 3).join(', ')}`));
+        }
+      }
+      continue;
+    }
+
     if (input === '/doctor') {
       const results = await runDoctor({
         projectDir, litellmUrl: opts.url, litellmKey: opts.key,
@@ -877,6 +932,8 @@ async function interactiveMode(projectDir, opts) {
     /claudemd         — Liet ke CLAUDE.md da load
     /memory [q]       — Memory store (list | search | clear)
     /guard            — Ground truth cua context guard
+    /route            — Last routing decisions (SmartRouter/classifier)
+    /locks            — Active decision locks
     /exit             — Thoat
     /help             — Hien help
 

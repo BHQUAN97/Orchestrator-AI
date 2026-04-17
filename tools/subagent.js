@@ -52,8 +52,8 @@ const SUBAGENT_PROFILES = {
  * @param {{ projectDir, litellmUrl, litellmKey, parentDepth?, budget?, hookRunner?, mcpRegistry? }} ctx
  */
 async function spawnSubagent(args, ctx) {
-  const { description, prompt, subagent_type = 'general-purpose' } = args;
-  const { projectDir, litellmUrl, litellmKey, parentDepth = 0, budget, hookRunner, mcpRegistry } = ctx;
+  const { description, prompt, subagent_type = 'general-purpose', auto_model = false } = args;
+  const { projectDir, litellmUrl, litellmKey, parentDepth = 0, budget, hookRunner, mcpRegistry, hermesBridge } = ctx;
 
   if (!prompt) return { success: false, error: 'Missing prompt' };
 
@@ -62,7 +62,23 @@ async function spawnSubagent(args, ctx) {
     return { success: false, error: 'Subagent depth limit reached (max 2 levels)' };
   }
 
-  const profile = SUBAGENT_PROFILES[subagent_type] || SUBAGENT_PROFILES['general-purpose'];
+  let profile = SUBAGENT_PROFILES[subagent_type] || SUBAGENT_PROFILES['general-purpose'];
+
+  // Auto-route: dung Hermes SmartRouter de chon model toi uu cho subagent
+  let routingDecision = null;
+  if (auto_model && hermesBridge) {
+    try {
+      const decision = await hermesBridge.selectModel({
+        task: subagent_type,
+        prompt,
+        files: []
+      });
+      if (decision?.model) {
+        profile = { ...profile, model: decision.model };
+        routingDecision = decision;
+      }
+    } catch { /* ignore, use default */ }
+  }
 
   // Lazy require agent-loop de tranh circular dep
   const { AgentLoop } = require('../lib/agent-loop');
@@ -93,10 +109,11 @@ Rules:
       agentRole: profile.role,
       maxIterations: profile.maxIter,
       streaming: false, // Subagent khong stream — chi tra ket qua cuoi
-      // Inherit parent resources: budget cap, hooks, MCP
+      // Inherit parent resources: budget cap, hooks, MCP, hermes
       budget: budget || undefined,       // undefined → AgentLoop creates unlimited new tracker
       hookRunner: hookRunner || undefined,
       mcpRegistry: mcpRegistry || null,
+      hermesBridge: hermesBridge || null,
       subagentDepth: parentDepth + 1
     });
 
@@ -117,6 +134,8 @@ Rules:
       iterations: result.iterations,
       tool_calls: result.tool_calls,
       files_changed: result.files_changed || [],
+      model_used: profile.model,
+      ...(routingDecision ? { routing: { method: routingDecision.method, reasons: routingDecision.reasons } } : {}),
       elapsed_ms: elapsed,
       ...(result.aborted ? { aborted: true, reason: result.reason } : {})
     };
