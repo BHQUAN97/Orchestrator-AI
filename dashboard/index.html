@@ -307,6 +307,32 @@
       .form-group label { width: auto; }
       .form-group input, .form-group select { max-width: 100%; width: 100%; }
       .header h1 { font-size: 15px; }
+      
+      /* Button responsive fixes */
+      .nav button {
+        padding: 16px 16px; /* Larger touch target */
+        min-height: 44px; /* Minimum touch target size */
+        font-size: 14px; /* Slightly larger text */
+      }
+      
+      .btn {
+        padding: 12px 24px; /* Larger touch target */
+        min-height: 44px; /* Minimum touch target size */
+        font-size: 14px; /* Slightly larger text */
+        min-width: 44px; /* Ensure minimum width for touch */
+      }
+      
+      .quick-link {
+        padding: 12px 16px; /* Larger touch target */
+        min-height: 44px; /* Minimum touch target size */
+      }
+      
+      /* Form elements touch target fixes */
+      select {
+        padding: 12px 16px !important; /* Larger touch target */
+        min-height: 44px !important; /* Minimum touch target size */
+        font-size: 14px !important; /* Larger text */
+      }
     }
   </style>
 </head>
