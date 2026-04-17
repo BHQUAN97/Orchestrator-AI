@@ -34,6 +34,9 @@ const MCP_PROTOCOL_VERSION = '2024-11-05';
 const RPC_TIMEOUT_MS = 30000;
 const INIT_TIMEOUT_MS = 15000;
 
+// fetch built-in tu Node 18+; fallback an toan neu moi truong cu
+const _fetch = (typeof fetch === 'function') ? fetch : null;
+
 /**
  * 1 MCP server client (stdio JSON-RPC)
  */
@@ -216,6 +219,308 @@ class MCPClient {
 }
 
 /**
+ * 1 MCP server client qua HTTP+SSE transport (MCP 2024-11-05 SSE spec)
+ *
+ * Config format:
+ *   { url: 'https://host/sse', headers: { Authorization: 'Bearer ...' }, type: 'sse' }
+ *
+ * Luong giao tiep:
+ *   - GET <url> (Accept: text/event-stream) → server tra event 'endpoint' voi POST URL
+ *   - POST <endpoint> body = JSON-RPC request → response qua SSE stream
+ *   - Notifications cung qua SSE
+ */
+class MCPSSEClient {
+  constructor(name, config) {
+    this.name = name;
+    this.config = config;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.tools = [];
+    this.resources = [];
+    this.prompts = [];
+    this.initialized = false;
+    this.startError = null;
+
+    // SSE state
+    this.sseController = null;
+    this.sseReader = null;
+    this.postEndpoint = null; // URL de POST JSON-RPC (server cung cap qua event 'endpoint')
+    this._endpointWaiters = [];
+    this._closed = false;
+  }
+
+  async start(timeoutMs = INIT_TIMEOUT_MS) {
+    if (this.initialized) return;
+    if (!_fetch) throw new Error(`MCP ${this.name}: global fetch not available (requires Node 18+)`);
+    if (!this.config.url) throw new Error(`MCP ${this.name}: missing 'url' for SSE transport`);
+
+    const deadline = Date.now() + timeoutMs;
+
+    // Open SSE stream
+    try {
+      await this._openSSE(timeoutMs);
+    } catch (e) {
+      this.startError = e;
+      throw new Error(`MCP ${this.name}: SSE connect failed — ${e.message}`);
+    }
+
+    // Wait endpoint event (some servers send it immediately, others require handshake)
+    try {
+      await this._waitForEndpoint(Math.max(1000, deadline - Date.now()));
+    } catch (e) {
+      // Neu server khong dung "endpoint" event, fallback: POST truc tiep vao url goc
+      this.postEndpoint = this.config.url;
+    }
+
+    try {
+      const initRes = await this._rpc('initialize', {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        clientInfo: { name: 'orcai', version: '2.2' }
+      });
+      if (initRes.error) throw new Error(`initialize: ${initRes.error.message}`);
+
+      this._notify('notifications/initialized', {});
+      this.initialized = true;
+
+      const toolsRes = await this._rpc('tools/list', {});
+      if (toolsRes.error) throw new Error(`tools/list: ${toolsRes.error.message}`);
+      this.tools = toolsRes.result?.tools || [];
+
+      try {
+        const resRes = await this._rpc('resources/list', {});
+        if (!resRes.error) this.resources = resRes.result?.resources || [];
+      } catch { this.resources = []; }
+
+      try {
+        const pRes = await this._rpc('prompts/list', {});
+        if (!pRes.error) this.prompts = pRes.result?.prompts || [];
+      } catch { this.prompts = []; }
+    } catch (e) {
+      this.startError = e;
+      await this.stop();
+      throw e;
+    }
+  }
+
+  async callTool(toolName, args) {
+    if (!this.initialized) throw new Error(`MCP ${this.name}: not initialized`);
+    const res = await this._rpc('tools/call', { name: toolName, arguments: args || {} });
+    if (res.error) return { success: false, error: res.error.message };
+
+    const content = res.result?.content || [];
+    const text = content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+    const nonText = content.filter(c => c.type !== 'text');
+    return {
+      success: !res.result?.isError,
+      content: text || '(no text content)',
+      ...(nonText.length > 0 ? { attachments: nonText.map(c => ({ type: c.type, mimeType: c.mimeType })) } : {}),
+      ...(res.result?.isError ? { error: text || 'Tool returned isError' } : {})
+    };
+  }
+
+  async readResource(uri) {
+    if (!this.initialized) throw new Error(`MCP ${this.name}: not initialized`);
+    const res = await this._rpc('resources/read', { uri });
+    if (res.error) return { success: false, error: res.error.message };
+    const contents = res.result?.contents || [];
+    const text = contents.filter(c => c.text).map(c => c.text).join('\n');
+    return { success: true, content: text || '(no text content)', mimeType: contents[0]?.mimeType };
+  }
+
+  async stop() {
+    this._closed = true;
+    this.initialized = false;
+    try { this.sseController?.abort(); } catch {}
+    try { await this.sseReader?.cancel(); } catch {}
+    this.sseController = null;
+    this.sseReader = null;
+    for (const [, { reject, timer }] of this.pending) {
+      clearTimeout(timer);
+      try { reject(new Error(`MCP ${this.name}: stopped`)); } catch {}
+    }
+    this.pending.clear();
+  }
+
+  // --- SSE internals ---
+
+  async _openSSE(timeoutMs) {
+    this.sseController = new AbortController();
+    const headers = {
+      'Accept': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      ...(this.config.headers || {})
+    };
+    const t = setTimeout(() => { try { this.sseController.abort(); } catch {} }, timeoutMs);
+
+    const res = await _fetch(this.config.url, {
+      method: 'GET',
+      headers,
+      signal: this.sseController.signal
+    });
+    clearTimeout(t);
+
+    if (!res.ok) throw new Error(`SSE HTTP ${res.status} ${res.statusText}`);
+    if (!res.body) throw new Error('SSE: no response body');
+
+    this.sseReader = res.body.getReader();
+    // Background loop — khong await de handshake duoc chay song song
+    this._pumpSSE().catch((e) => {
+      if (!this._closed) this._fatal(e);
+    });
+  }
+
+  async _pumpSSE() {
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    while (!this._closed) {
+      const { value, done } = await this.sseReader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Tach theo \n\n — moi event SSE ket thuc bang blank line
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1 || (idx = buffer.indexOf('\r\n\r\n')) !== -1) {
+        const rawEvent = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + (buffer[idx] === '\r' ? 4 : 2));
+        this._handleSSEEvent(rawEvent);
+      }
+    }
+  }
+
+  _handleSSEEvent(raw) {
+    let event = 'message';
+    const dataLines = [];
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line || line.startsWith(':')) continue; // comment/keepalive
+      const colonIdx = line.indexOf(':');
+      const field = colonIdx === -1 ? line : line.slice(0, colonIdx);
+      const val = colonIdx === -1 ? '' : line.slice(colonIdx + 1).replace(/^ /, '');
+      if (field === 'event') event = val;
+      else if (field === 'data') dataLines.push(val);
+    }
+    const data = dataLines.join('\n');
+    if (!data) return;
+
+    if (event === 'endpoint') {
+      // Server thong bao URL de POST JSON-RPC
+      try {
+        const base = new URL(this.config.url);
+        const resolved = new URL(data, base).toString();
+        this.postEndpoint = resolved;
+      } catch {
+        this.postEndpoint = data;
+      }
+      const waiters = this._endpointWaiters.splice(0);
+      waiters.forEach(w => w.resolve(this.postEndpoint));
+      return;
+    }
+
+    // Message event — parse JSON-RPC
+    let msg;
+    try { msg = JSON.parse(data); } catch { return; }
+    if (msg.id != null && this.pending.has(msg.id)) {
+      const { resolve, timer } = this.pending.get(msg.id);
+      clearTimeout(timer);
+      this.pending.delete(msg.id);
+      resolve(msg);
+    }
+    // Server notifications ignored
+  }
+
+  _waitForEndpoint(timeoutMs) {
+    if (this.postEndpoint) return Promise.resolve(this.postEndpoint);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const i = this._endpointWaiters.findIndex(w => w.timer === timer);
+        if (i >= 0) this._endpointWaiters.splice(i, 1);
+        reject(new Error('endpoint event not received'));
+      }, timeoutMs);
+      this._endpointWaiters.push({ resolve: (v) => { clearTimeout(timer); resolve(v); }, timer });
+    });
+  }
+
+  _fatal(err) {
+    this.startError = err;
+    for (const [, { reject, timer }] of this.pending) {
+      clearTimeout(timer);
+      try { reject(err); } catch {}
+    }
+    this.pending.clear();
+    this.initialized = false;
+  }
+
+  async _postRPC(payload) {
+    const endpoint = this.postEndpoint || this.config.url;
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      ...(this.config.headers || {})
+    };
+    const res = await _fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    });
+    // 202 Accepted — response qua SSE stream (khong doc body)
+    // 200 + JSON — 1 so server tra ket qua truc tiep
+    if (res.status === 200) {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        try {
+          const body = await res.json();
+          if (body && body.id != null && this.pending.has(body.id)) {
+            const { resolve, timer } = this.pending.get(body.id);
+            clearTimeout(timer);
+            this.pending.delete(body.id);
+            resolve(body);
+          }
+        } catch { /* ignore — cho SSE */ }
+      }
+    } else if (res.status >= 400) {
+      throw new Error(`POST ${endpoint} HTTP ${res.status}`);
+    }
+  }
+
+  _rpc(method, params) {
+    return new Promise((resolve, reject) => {
+      if (this._closed) return reject(new Error(`MCP ${this.name}: closed`));
+      const id = this.nextId++;
+      const payload = { jsonrpc: '2.0', id, method, params };
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(new Error(`MCP ${this.name}: RPC timeout on ${method}`));
+        }
+      }, RPC_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer });
+      this._postRPC(payload).catch((e) => {
+        if (this.pending.has(id)) {
+          clearTimeout(timer);
+          this.pending.delete(id);
+          reject(e);
+        }
+      });
+    });
+  }
+
+  _notify(method, params) {
+    // Notification: khong co id, khong cho response
+    this._postRPC({ jsonrpc: '2.0', method, params }).catch(() => {});
+  }
+}
+
+/**
+ * Chon transport class dua tren config
+ */
+function pickTransportClass(cfg) {
+  if (!cfg) return MCPClient;
+  if (cfg.type === 'sse' || cfg.type === 'http') return MCPSSEClient;
+  if (cfg.url && !cfg.command) return MCPSSEClient;
+  return MCPClient;
+}
+
+/**
  * Registry: quan ly nhieu MCP clients, expose tool list & call dispatch
  */
 class MCPRegistry {
@@ -260,7 +565,8 @@ class MCPRegistry {
     }
 
     const results = await Promise.allSettled(entries.map(async ([name, cfg]) => {
-      const client = new MCPClient(name, cfg);
+      const Transport = pickTransportClass(cfg);
+      const client = new Transport(name, cfg);
       await client.start();
       this.clients.set(name, client);
       for (const tool of client.tools) {
@@ -378,4 +684,4 @@ function getRegistry() {
   return globalRegistry;
 }
 
-module.exports = { MCPClient, MCPRegistry, getRegistry };
+module.exports = { MCPClient, MCPSSEClient, MCPRegistry, getRegistry, pickTransportClass };
