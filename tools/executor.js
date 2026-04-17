@@ -61,6 +61,9 @@ class ToolExecutor {
     // Hermes bridge (SmartRouter + DecisionLock)
     this.hermesBridge = options.hermesBridge || null;
 
+    // Agent bus (inter-agent messaging)
+    this.agentBus = options.agentBus || null;
+
     // Diff approval callback — goi truoc write/edit trong interactive mode
     // Signature: (filePath, before, after) => 'yes' | 'no' | 'abort'
     this.onWriteApproval = options.onWriteApproval || null;
@@ -101,7 +104,8 @@ class ToolExecutor {
         budget: this.parentBudget,         // share parent budget cap
         hookRunner: this.parentHookRunner, // share parent hook runner
         mcpRegistry: this.mcpRegistry,     // share MCP
-        hermesBridge: this.hermesBridge    // share Hermes (SmartRouter + DecisionLock)
+        hermesBridge: this.hermesBridge,   // share Hermes (SmartRouter + DecisionLock)
+        agentBus: this.agentBus            // share inter-agent bus
       }),
       'decompose_task':  (args) => decomposeTask(args, { hermesBridge: this.hermesBridge }),
       'read_mcp_resource': async (args) => {
@@ -123,7 +127,8 @@ class ToolExecutor {
         budget: this.parentBudget,
         hookRunner: this.parentHookRunner,
         mcpRegistry: this.mcpRegistry,
-        hermesBridge: this.hermesBridge
+        hermesBridge: this.hermesBridge,
+        agentBus: this.agentBus
       }),
       'task_complete':   (args) => this._handleTaskComplete(args)
     };

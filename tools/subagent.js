@@ -53,7 +53,8 @@ const SUBAGENT_PROFILES = {
  */
 async function spawnSubagent(args, ctx) {
   const { description, prompt, subagent_type = 'general-purpose', auto_model = false } = args;
-  const { projectDir, litellmUrl, litellmKey, parentDepth = 0, budget, hookRunner, mcpRegistry, hermesBridge } = ctx;
+  const { projectDir, litellmUrl, litellmKey, parentDepth = 0, budget, hookRunner, mcpRegistry, hermesBridge, agentBus } = ctx;
+  const agentId = `${subagent_type}-${Date.now().toString(36).slice(-5)}`;
 
   if (!prompt) return { success: false, error: 'Missing prompt' };
 
@@ -100,6 +101,11 @@ Rules:
 
   const startTime = Date.now();
 
+  // Emit spawn event cho parent observe
+  if (agentBus) {
+    agentBus.emit('spawn', { agentId, subagent_type, description: description || '', depth: parentDepth + 1 });
+  }
+
   try {
     const child = new AgentLoop({
       litellmUrl,
@@ -109,11 +115,13 @@ Rules:
       agentRole: profile.role,
       maxIterations: profile.maxIter,
       streaming: false, // Subagent khong stream — chi tra ket qua cuoi
-      // Inherit parent resources: budget cap, hooks, MCP, hermes
+      // Inherit parent resources: budget cap, hooks, MCP, hermes, bus
       budget: budget || undefined,       // undefined → AgentLoop creates unlimited new tracker
       hookRunner: hookRunner || undefined,
       mcpRegistry: mcpRegistry || null,
       hermesBridge: hermesBridge || null,
+      agentBus: agentBus || null,
+      agentId,
       subagentDepth: parentDepth + 1
     });
 
@@ -122,6 +130,17 @@ Rules:
 
     const result = await child.run(systemPrompt, prompt);
     const elapsed = Date.now() - startTime;
+
+    // Emit completion
+    if (agentBus) {
+      agentBus.emit('task_complete', {
+        agentId,
+        success: !!result.success,
+        summary: (result.summary || '').slice(0, 300),
+        iterations: result.iterations,
+        elapsed_ms: elapsed
+      });
+    }
 
     // Trich xuat summary ngan — parent agent chi thay nay
     const summary = result.summary || result.final_message || '(subagent returned no summary)';
@@ -140,6 +159,7 @@ Rules:
       ...(result.aborted ? { aborted: true, reason: result.reason } : {})
     };
   } catch (e) {
+    if (agentBus) agentBus.emit('error', { agentId, error: String(e.message || e) });
     return { success: false, error: `Subagent failed: ${e.message}` };
   }
 }

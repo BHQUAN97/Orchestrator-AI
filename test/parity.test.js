@@ -1020,6 +1020,187 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(agent.retries === 3);
   });
 
+  // --- Semantic search (TF-IDF) ---
+  test('semantic-search tokenize strips stop words', () => {
+    const { tokenize } = require('../lib/semantic-search');
+    const tokens = tokenize('The quick brown fox jumps over the lazy dog');
+    assert(!tokens.includes('the'));
+    assert(tokens.includes('quick'));
+    assert(tokens.includes('brown'));
+  });
+
+  test('semantic-search buildIndex + search ranks by TF-IDF', () => {
+    const { buildIndex, search } = require('../lib/semantic-search');
+    const docs = [
+      { id: 'a', text: 'authentication login jwt token' },
+      { id: 'b', text: 'database migration postgres sql' },
+      { id: 'c', text: 'login form password validation' }
+    ];
+    const index = buildIndex(docs);
+    const results = search(index, 'login authentication', 3);
+    assert(results.length > 0);
+    // 'a' should rank highest — matches both terms; 'c' matches only login
+    assert(results[0].id === 'a', `expected 'a' first, got '${results[0].id}'`);
+  });
+
+  test('semantic-search empty query returns empty', () => {
+    const { searchCorpus } = require('../lib/semantic-search');
+    const res = searchCorpus([{ id: '1', text: 'hello world' }], '', 5);
+    assert(res.length === 0);
+  });
+
+  // --- Memory uses TF-IDF ---
+  test('MemoryStore search ranks by relevance', () => {
+    const { MemoryStore } = require('../lib/memory');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orcai-mem-'));
+    const store = new MemoryStore(tmpDir);
+    store.append({ type: 'lesson', summary: 'Always use bcrypt for password hashing', prompt_summary: 'auth setup' });
+    store.append({ type: 'fact', summary: 'Postgres migrations run in transactions', prompt_summary: 'db migration' });
+    store.append({ type: 'lesson', summary: 'Use refresh tokens for JWT rotation', prompt_summary: 'jwt auth' });
+    const results = store.search('jwt password auth', 3);
+    assert(results.length > 0);
+    // First match should be auth-related
+    assert(/password|jwt|auth/i.test(results[0].summary));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // --- Rate limit state ---
+  test('rate limit state exported + resetable', () => {
+    const { getRateLimitState, resetRateLimitState } = require('../lib/retry');
+    resetRateLimitState();
+    const s = getRateLimitState();
+    assert(s.remaining === null);
+    assert(s.retryCount === 0);
+  });
+
+  test('captureRateLimit parses headers', () => {
+    const { captureRateLimit, getRateLimitState, resetRateLimitState } = require('../lib/retry');
+    resetRateLimitState();
+    // Mock response
+    const fakeResp = {
+      headers: {
+        get(key) {
+          const data = {
+            'x-ratelimit-remaining-requests': '42',
+            'x-ratelimit-limit-requests': '100',
+            'x-ratelimit-reset-requests': '30'
+          };
+          return data[key.toLowerCase()] || null;
+        }
+      }
+    };
+    captureRateLimit(fakeResp);
+    const s = getRateLimitState();
+    assert(s.remaining === 42);
+    assert(s.limit === 100);
+    assert(s.resetAt && s.resetAt > Date.now());
+  });
+
+  // --- Agent bus ---
+  test('AgentBus emits events + tracks history', () => {
+    const { AgentBus } = require('../lib/agent-bus');
+    const bus = new AgentBus();
+    let got = null;
+    bus.on('progress', (e) => { got = e; });
+    bus.emit('progress', { agentId: 'sub-1', message: 'working' });
+    assert(got);
+    assert(got.agentId === 'sub-1');
+    assert(bus.history.length === 1);
+  });
+
+  test('AgentReporter pushes events via bus', () => {
+    const { AgentBus, AgentReporter } = require('../lib/agent-bus');
+    const bus = new AgentBus();
+    const events = [];
+    bus.on('progress', (e) => events.push(e));
+    bus.on('task_complete', (e) => events.push(e));
+    const r = new AgentReporter(bus, 'agent-xyz');
+    r.progress('step 1', 1);
+    r.taskComplete(true, 'done');
+    assert(events.length === 2);
+    assert(events[0].message === 'step 1');
+    assert(events[1].success === true);
+  });
+
+  test('AgentReporter no-op when bus is null', () => {
+    const { AgentReporter } = require('../lib/agent-bus');
+    const r = new AgentReporter(null, 'agent-x');
+    r.progress('nothing'); // Should not throw
+    r.taskComplete(false, 'failed');
+    assert(true);
+  });
+
+  // --- AgentLoop wires agent bus ---
+  test('AgentLoop accepts agentBus option', () => {
+    const { AgentBus } = require('../lib/agent-bus');
+    const { AgentLoop } = require('../lib/agent-loop');
+    const bus = new AgentBus();
+    const agent = new AgentLoop({
+      projectDir: path.resolve(__dirname, '..'),
+      agentBus: bus,
+      agentId: 'test-agent'
+    });
+    assert(agent.agentBus === bus);
+    assert(agent.agentId === 'test-agent');
+    assert(agent.executor.agentBus === bus);
+  });
+
+  // --- Replay ---
+  test('replay listTranscripts empty when no dir', () => {
+    const { listTranscripts } = require('../lib/replay');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orcai-tr-'));
+    const list = listTranscripts(tmpDir);
+    assert(Array.isArray(list));
+    assert(list.length === 0);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('replay parseEvents handles JSONL', () => {
+    const { parseEvents } = require('../lib/replay');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orcai-tr-'));
+    const file = path.join(tmpDir, 'test.jsonl');
+    fs.writeFileSync(file, '{"type":"meta","sessionId":"abc"}\n{"type":"tool_call","name":"read_file"}\n');
+    const events = parseEvents(file);
+    assert(events.length === 2);
+    assert(events[0].type === 'meta');
+    assert(events[1].name === 'read_file');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('replay findTranscript by prefix', () => {
+    const { findTranscript } = require('../lib/replay');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orcai-tr-'));
+    const tDir = path.join(tmpDir, '.orcai', 'transcripts');
+    fs.mkdirSync(tDir, { recursive: true });
+    fs.writeFileSync(path.join(tDir, 'session-12345.jsonl'), '{"type":"meta"}\n');
+    const found = findTranscript(tmpDir, 'session-12345');
+    assert(found && found.endsWith('session-12345.jsonl'));
+    const latest = findTranscript(tmpDir, 'latest');
+    assert(latest === found);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  await test('replayTranscript prints events', async () => {
+    const { replayTranscript } = require('../lib/replay');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orcai-tr-'));
+    const tDir = path.join(tmpDir, '.orcai', 'transcripts');
+    fs.mkdirSync(tDir, { recursive: true });
+    fs.writeFileSync(path.join(tDir, 'abc.jsonl'),
+      '{"type":"meta","ts":"2026-04-17T00:00:00Z","sessionId":"abc"}\n' +
+      '{"type":"tool_call","ts":"2026-04-17T00:00:01Z","name":"read_file","args":{"path":"x.js"}}\n' +
+      '{"type":"tool_result","ts":"2026-04-17T00:00:02Z","name":"read_file","success":true,"preview":"ok"}\n'
+    );
+    // Suppress console output during test
+    const origLog = console.log;
+    console.log = () => {};
+    const res = await replayTranscript(tmpDir, 'abc');
+    console.log = origLog;
+    assert(res.success);
+    assert(res.events === 3);
+    assert(res.tool_calls === 1);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

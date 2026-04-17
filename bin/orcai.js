@@ -48,6 +48,9 @@ const { MemoryStore } = require('../lib/memory');
 const { ContextGuard, formatIssues } = require('../lib/context-guard');
 const { HermesBridge } = require('../lib/hermes-bridge');
 const { delegateToOrchestrator, checkOrchestratorHealth } = require('../lib/orchestrator-client');
+const { replayTranscript, listTranscripts } = require('../lib/replay');
+const { AgentBus } = require('../lib/agent-bus');
+const { getRateLimitState } = require('../lib/retry');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
@@ -56,6 +59,7 @@ const BUILTIN_CMDS = [
   'doctor', 'todos', 'transcript', 'claudemd',
   'memory', 'team', 'guard', 'route', 'locks',
   'orchestrator', 'orch', 'delegate', 'bg',
+  'replay', 'transcripts', 'redo', 'ratelimit', 'rl',
   'exit', 'quit', 'help'
 ];
 
@@ -103,6 +107,10 @@ program
   .option('--orchestrator-url <url>', 'Orchestrator URL', process.env.ORCHESTRATOR_URL || 'http://localhost:5003')
   .option('--no-parallel', 'Disable parallel execution of read-safe tools')
   .option('--retries <n>', 'Number of LLM retries on network/429/503 errors (default 3)', '3')
+  .option('--replay <sessionId>', 'Replay transcript from previous session (use "latest" for most recent)')
+  .option('--replay-speed <ms>', 'Delay between events when replaying (default 0)', '0')
+  .option('--replay-filter <type>', 'Only show events of type: message|tool_call|tool_result|meta|error')
+  .option('--replay-verbose', 'Show full args in replay')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
     const projectDir = path.resolve(opts.project);
@@ -113,6 +121,27 @@ program
     if (!opts.model || opts.model === 'smart') opts.model = opts.model || cfg.get('model') || 'smart';
     if (!opts.url || opts.url === 'http://localhost:5002') opts.url = cfg.get('litellm.url') || opts.url;
     if (!opts.key || opts.key === 'sk-master-change-me') opts.key = cfg.get('litellm.key') || opts.key;
+
+    // --replay: phat lai transcript roi exit (khong can LLM)
+    if (opts.replay) {
+      const res = await replayTranscript(projectDir, opts.replay, {
+        speed: parseInt(opts.replaySpeed, 10) || 0,
+        filter: opts.replayFilter || null,
+        verbose: !!opts.replayVerbose
+      });
+      if (!res.success) {
+        console.log(chalk.red(`  ✗ ${res.error}`));
+        const available = listTranscripts(projectDir).slice(0, 5);
+        if (available.length) {
+          console.log(chalk.gray('  Available sessions:'));
+          for (const t of available) {
+            console.log(chalk.gray(`    ${t.sessionId} (${new Date(t.mtime).toISOString().slice(0, 19)})`));
+          }
+        }
+        process.exit(1);
+      }
+      return;
+    }
 
     // Banner
     printBanner(projectDir, opts.model, opts.role);
@@ -157,6 +186,21 @@ program
     opts._approvalState = approvalState;
     opts._budget = budget;
     opts._hookRunner = hookRunner;
+
+    // Agent bus (inter-agent messaging) — shared across CLI session
+    opts._agentBus = new AgentBus();
+    opts._agentBus.on('spawn', (e) => {
+      console.log(chalk.gray(`  🤖 spawn ${e.subagent_type} (${e.agentId}) depth=${e.depth}: ${e.description.slice(0, 60)}`));
+    });
+    opts._agentBus.on('progress', (e) => {
+      if (e.iteration % 5 === 0) {
+        console.log(chalk.gray(`     [${e.agentId}] iter ${e.iteration}/${e.maxIterations}`));
+      }
+    });
+    opts._agentBus.on('task_complete', (e) => {
+      const icon = e.success ? chalk.green('✓') : chalk.red('✗');
+      console.log(`  ${icon} [${e.agentId}] done in ${e.iterations} iter, ${Math.round(e.elapsed_ms/100)/10}s`);
+    });
 
     // Memory store (shared across subagents + runs)
     if (opts.memory !== false) {
@@ -385,6 +429,7 @@ function createAgent(projectDir, opts) {
     useClassifier: !!opts.useClassifier,
     parallelReadSafe: opts.parallel !== false,
     retries: parseInt(opts.retries || '3'),
+    agentBus: opts._agentBus || null,
 
     // Diff approval — chi hoi trong interactive mode + co TTY
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
@@ -810,6 +855,54 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
+    if (input === '/transcripts') {
+      const list = listTranscripts(projectDir);
+      if (!list.length) { console.log(chalk.gray('  No transcripts saved.')); continue; }
+      console.log(chalk.gray(`  ${list.length} session(s):`));
+      for (const t of list.slice(0, 10)) {
+        const ts = new Date(t.mtime).toISOString().slice(0, 19);
+        const kb = (t.size / 1024).toFixed(1);
+        console.log(chalk.gray(`    ${t.sessionId} — ${ts} — ${kb}KB`));
+      }
+      console.log(chalk.gray('  Replay: /replay <id>  or  orcai --replay <id>'));
+      continue;
+    }
+
+    if (input.startsWith('/replay')) {
+      const id = input.slice('/replay'.length).trim() || 'latest';
+      await replayTranscript(projectDir, id, { verbose: false });
+      continue;
+    }
+
+    if (input === '/ratelimit' || input === '/rl') {
+      const rl = getRateLimitState();
+      if (rl.remaining == null && rl.lastError == null) {
+        console.log(chalk.gray('  No rate limit data yet (make some requests first).'));
+      } else {
+        if (rl.limit != null) console.log(chalk.gray(`  Requests: ${rl.remaining}/${rl.limit}`));
+        if (rl.resetAt) console.log(chalk.gray(`  Reset: ${new Date(rl.resetAt).toISOString()}`));
+        if (rl.retryCount > 0) console.log(chalk.yellow(`  Retries this session: ${rl.retryCount}`));
+        if (rl.lastError) {
+          const ago = Math.round((Date.now() - rl.lastError.ts) / 1000);
+          console.log(chalk.red(`  Last 429/5xx: ${ago}s ago (HTTP ${rl.lastError.status})`));
+        }
+      }
+      continue;
+    }
+
+    if (input === '/redo') {
+      // Tim user message cuoi cung (khong phai slash cmd) va re-run
+      const userMsgs = agent.messages.filter(m => m.role === 'user' && typeof m.content === 'string' && !m.content.startsWith('/'));
+      if (!userMsgs.length) { console.log(chalk.yellow('  No previous prompt to redo.')); continue; }
+      const last = userMsgs[userMsgs.length - 1].content;
+      console.log(chalk.gray(`  Redo: ${last.slice(0, 100)}${last.length > 100 ? '...' : ''}`));
+      // Reset agent state cho clean re-run
+      agent.completed = false;
+      agent.aborted = false;
+      agent.iteration = 0;
+      input = last; // Fall through to normal prompt handling
+    }
+
     if (input === '/claudemd') {
       const { sources } = loadClaudeMdHierarchy(projectDir);
       if (sources.length === 0) {
@@ -1013,6 +1106,10 @@ async function interactiveMode(projectDir, opts) {
     /orchestrator     — Check Orchestrator health
     /delegate <task>  — Delegate task to Orchestrator pipeline
     /bg               — List background processes
+    /transcripts      — List saved session transcripts
+    /replay [id]      — Replay transcript (default: latest)
+    /redo             — Re-run last user prompt
+    /ratelimit, /rl   — API rate limit state
     /exit             — Thoat
     /help             — Hien help
 
