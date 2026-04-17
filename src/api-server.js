@@ -259,12 +259,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, { runs: orchestrator.getHistory(Math.min(limit, 100), project) });
     }
 
-    // GET /api/runs — danh sach run dang chay (cho cancel)
+    // GET /api/runs — danh sach run dang chay (cho cancel + SSE)
     if (url.pathname === '/api/runs') {
       const runs = [];
       for (const [traceId, info] of activeRuns) {
         runs.push({
-          traceId,
+          traceId,                  // dung cho cancel: DELETE /api/run/:traceId
+          tracerId: info.tracerId,  // dung cho SSE: GET /api/stream/:tracerId
           prompt: info.prompt.slice(0, 100),
           project: info.project,
           startedAt: info.startedAt,
@@ -286,12 +287,17 @@ const server = http.createServer(async (req, res) => {
       return json(res, { templates: loadTemplates() });
     }
 
-    // GET /api/stream/:traceId — Server-Sent Events: live pipeline progress
+    // GET /api/stream/:id — Server-Sent Events: live pipeline progress.
+    // Accept ca api id (run-...) hoac tracer id (trc-...) — auto resolve.
     // Mobile dung de tracking real-time thay vi cho 1-2 phut.
     // Listener cleanup khi client disconnect HOAC nhan event 'finish'.
     if (url.pathname.startsWith('/api/stream/')) {
-      const traceId = url.pathname.split('/api/stream/')[1];
+      let traceId = url.pathname.split('/api/stream/')[1];
       if (!traceId) return error(res, 400, 'Missing traceId');
+
+      // Resolve api id → tracer id (trc-...)
+      const apiInfo = activeRuns.get(traceId);
+      if (apiInfo?.tracerId) traceId = apiInfo.tracerId;
 
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -373,10 +379,23 @@ const server = http.createServer(async (req, res) => {
       const controller = new AbortController();
       const traceId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const project = String(body.project || '').slice(0, 500);
-      activeRuns.set(traceId, {
+      const info = {
         controller, signal: controller.signal,
-        prompt: body.prompt, project, startedAt: Date.now()
-      });
+        prompt: body.prompt, project, startedAt: Date.now(),
+        tracerId: null  // Capture qua listener khi tracer start
+      };
+      activeRuns.set(traceId, info);
+
+      // Capture tracer's id (trc-...) khi run() khoi dong tracer.
+      // Single-thread Node + listener attach truoc await → no race.
+      // SSE endpoint accept both formats: api id (run-...) → resolve sang trc-...
+      const startListener = (event) => {
+        if (event.type === 'start' && !info.tracerId) {
+          info.tracerId = event.traceId;
+          orchestrator.tracer.off('trace:event', startListener);
+        }
+      };
+      orchestrator.tracer.on('trace:event', startListener);
 
       try {
         const result = await orchestrator.run(body.prompt, {
