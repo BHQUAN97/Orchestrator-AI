@@ -23,12 +23,17 @@ const path = require('path');
 const { AgentLoop } = require('../lib/agent-loop');
 const { getToolsSummary } = require('../tools/definitions');
 const { RepoMapper } = require('../lib/repo-mapper');
+const { RepoCache } = require('../lib/repo-cache');
 const { Config } = require('../lib/config');
 const { ConversationManager } = require('../lib/conversation-manager');
 const { expandMentions } = require('../lib/mention-expander');
 const { discoverCommands, expandCommand, formatCommandList } = require('../lib/slash-commands');
 const { askApproval, ApprovalState } = require('../tools/diff-approval');
 const { getRegistry } = require('../tools/mcp-client');
+const { BudgetTracker } = require('../lib/budget');
+const { HookRunner } = require('../lib/hooks');
+const { runPlanFlow } = require('../lib/plan-mode');
+const { initProject } = require('../lib/init-project');
 
 // === CLI Setup ===
 const program = new Command();
@@ -47,9 +52,14 @@ program
   .option('--key <key>', 'LiteLLM API key', process.env.LITELLM_KEY || 'sk-master-change-me')
   .option('--no-confirm', 'Bỏ qua confirm cho lệnh nguy hiểm (cẩn thận!)')
   .option('--direct', 'Direct mode: skip repo scan, minimal system prompt (faster for simple tasks)')
+  .option('--plan', 'Plan mode: analyze + show plan before executing')
+  .option('--resume [id]', 'Resume previous session (latest if no id given)')
+  .option('--budget <usd>', 'Cap session cost in USD (e.g. 0.50). Aborts agent when exceeded.')
   .option('-y, --yes', 'Auto-approve all file changes (skip diff approval in interactive mode)')
   .option('--no-cache', 'Disable Anthropic prompt caching')
   .option('--no-mcp', 'Disable MCP server loading')
+  .option('--no-hooks', 'Disable hooks (PreToolUse/PostToolUse/Stop)')
+  .option('--no-repo-cache', 'Force re-scan repo (skip repo-cache.json)')
   .option('--mcp-config <path>', 'Path to additional MCP config JSON')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
@@ -71,8 +81,26 @@ program
     // Approval state share qua toan bo session
     const approvalState = new ApprovalState({ autoYes: !!opts.yes });
 
+    // Budget tracker (shared across all agents in this run)
+    const capUsd = opts.budget ? parseFloat(opts.budget) : Infinity;
+    const budget = new BudgetTracker({ capUsd, model: opts.model });
+    if (capUsd !== Infinity && capUsd > 0) {
+      console.log(chalk.gray(`  Budget cap: $${capUsd.toFixed(4)}`));
+    }
+
+    // Hook runner (shared)
+    const hookRunner = new HookRunner({ projectDir, enabled: opts.hooks !== false });
+    hookRunner.load();
+    const hookStats = hookRunner.getStats();
+    const totalHooks = Object.values(hookStats).reduce((a, b) => a + b, 0);
+    if (totalHooks > 0) {
+      console.log(chalk.gray(`  Hooks: ${totalHooks} loaded (${Object.entries(hookStats).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(', ')})`));
+    }
+
     opts._mcpRegistry = mcpRegistry;
     opts._approvalState = approvalState;
+    opts._budget = budget;
+    opts._hookRunner = hookRunner;
 
     if (opts.interactive || !prompt) {
       await interactiveMode(projectDir, opts);
@@ -133,11 +161,16 @@ Nguyen tac:
 - Comment business logic tieng Viet, technical tieng Anh`;
   }
 
-  // Quét project structure bằng RepoMapper
+  // Quét project structure — uu tien RepoCache (1hr TTL, invalidate theo git HEAD + package.json)
   let repoContext = '';
   try {
-    const mapper = new RepoMapper({ projectDir });
-    repoContext = await mapper.getCompactSummary(projectDir);
+    if (opts.repoCache !== false) {
+      const cache = new RepoCache({ projectDir });
+      repoContext = await cache.getSummary();
+    } else {
+      const mapper = new RepoMapper({ projectDir });
+      repoContext = await mapper.getCompactSummary(projectDir);
+    }
   } catch {
     repoContext = `Project: ${projectName}`;
   }
@@ -187,6 +220,9 @@ function createAgent(projectDir, opts) {
     maxIterations: parseInt(opts.maxIterations),
     promptCaching: opts.cache !== false,
     mcpRegistry: opts._mcpRegistry || null,
+    budget: opts._budget || null,
+    hookRunner: opts._hookRunner || null,
+    hooks: opts.hooks !== false,
 
     // Diff approval — chi hoi trong interactive mode + co TTY
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
@@ -294,8 +330,25 @@ async function oneShotMode(prompt, projectDir, opts) {
   console.log(chalk.gray(`\n  > ${prompt}\n`));
 
   const systemPrompt = await buildSystemPrompt(projectDir, opts.role, opts);
-  const { agent } = createAgent(projectDir, opts);
 
+  // Plan mode: analyze first, then execute
+  if (opts.plan) {
+    const systemPlanner = await buildSystemPrompt(projectDir, 'planner', opts);
+    const result = await runPlanFlow(expanded, {
+      systemPromptPlanner: systemPlanner,
+      systemPromptBuilder: systemPrompt,
+      createPlannerAgent: () => createAgent(projectDir, { ...opts, role: 'planner' }).agent,
+      createBuilderAgent: () => createAgent(projectDir, opts).agent
+    });
+    if (!result.approved) {
+      console.log(chalk.gray('\n  Plan rejected. Nothing executed.'));
+      return;
+    }
+    printResult(result.result);
+    return;
+  }
+
+  const { agent } = createAgent(projectDir, opts);
   const result = await agent.run(systemPrompt, expanded);
   printResult(result);
   printCacheStats(agent);
@@ -308,7 +361,8 @@ function printCacheStats(agent) {
   const savings = stats.total_cache_read_tokens > 0
     ? ` — saved ~${Math.round(stats.total_cache_read_tokens * 0.9)} tokens via cache`
     : '';
-  console.log(chalk.gray(`  Tokens: ${stats.total_input_tokens} in, ${stats.total_completion_tokens} out | cache hit: ${stats.cache_hit_rate_pct}%${savings}`));
+  const costStr = stats.cost?.spent_usd > 0 ? ` | cost: $${stats.cost.spent_usd.toFixed(4)}` : '';
+  console.log(chalk.gray(`  Tokens: ${stats.total_input_tokens} in, ${stats.total_completion_tokens} out | cache hit: ${stats.cache_hit_rate_pct}%${savings}${costStr}`));
 }
 
 // === Interactive Mode ===
@@ -320,9 +374,31 @@ async function interactiveMode(projectDir, opts) {
   // Discover custom slash commands (skills/*.md + .claude/commands/*.md + global)
   const customCommands = discoverCommands(projectDir);
 
-  // Session management
+  // Session management — support --resume
   const cm = new ConversationManager({ projectDir });
-  const session = cm.createSession();
+  let session;
+  if (opts.resume) {
+    const target = opts.resume === true
+      ? cm.getLastSession()
+      : cm.loadSession(opts.resume);
+    if (target && target.id) {
+      session = { id: target.id, createdAt: target.createdAt, projectDir };
+      // Restore messages into agent
+      if (Array.isArray(target.messages) && target.messages.length > 0) {
+        agent.messages = target.messages;
+        hasRun = true;
+        console.log(chalk.green(`  Resumed session ${session.id} — ${target.messages.length} messages, ${(target.filesChanged || []).length} file(s) changed previously.`));
+      } else {
+        console.log(chalk.yellow(`  Session ${session.id} is empty — starting fresh.`));
+      }
+    } else {
+      console.log(chalk.yellow('  No prior session found, starting new.'));
+      session = cm.createSession();
+    }
+  } else {
+    session = cm.createSession();
+  }
+
   console.log(chalk.gray(`  Session: ${session.id}`));
   if (customCommands.size > 0) {
     console.log(chalk.gray(`  ${customCommands.size} custom command(s) loaded. /help to list.`));
@@ -448,22 +524,93 @@ async function interactiveMode(projectDir, opts) {
     if (input === '/cache on') { agent.promptCaching = true; console.log(chalk.gray('  cache: on')); continue; }
     if (input === '/cache off') { agent.promptCaching = false; console.log(chalk.gray('  cache: off')); continue; }
 
+    if (input === '/budget') {
+      const s = agent.budget.getStats();
+      const cap = s.cap_usd === null ? 'unlimited' : `$${s.cap_usd.toFixed(4)}`;
+      console.log(chalk.gray(`  Budget: $${s.spent_usd.toFixed(4)} / ${cap} — ${s.calls} calls${s.exceeded ? chalk.red(' [EXCEEDED]') : ''}`));
+      continue;
+    }
+
+    if (input === '/compact') {
+      const before = agent.tokenManager.estimateTokens(agent.messages);
+      const budget = Math.floor(agent.tokenManager.maxTokens * 0.4);
+      agent.messages = agent.tokenManager.trimMessages(agent.messages, budget);
+      const after = agent.tokenManager.estimateTokens(agent.messages);
+      console.log(chalk.gray(`  Compacted: ${before} → ${after} tokens (${Math.round((1 - after / Math.max(before, 1)) * 100)}% reduction)`));
+      continue;
+    }
+
+    if (input.startsWith('/init')) {
+      const force = input.includes(' --force');
+      const res = await initProject(projectDir, { force });
+      if (res.created) {
+        console.log(chalk.green(`  ✓ Generated ${res.path} — ${res.stats.lines} lines`));
+      } else {
+        console.log(chalk.yellow(`  ${res.reason}`));
+      }
+      continue;
+    }
+
+    if (input.startsWith('/plan ')) {
+      const task = input.slice('/plan '.length).trim();
+      if (!task) { console.log(chalk.yellow('  Usage: /plan <task>')); continue; }
+      const systemPlanner = await buildSystemPrompt(projectDir, 'planner', opts);
+      const result = await runPlanFlow(task, {
+        systemPromptPlanner: systemPlanner,
+        systemPromptBuilder: systemPrompt,
+        createPlannerAgent: () => createAgent(projectDir, { ...opts, role: 'planner' }).agent,
+        createBuilderAgent: () => createAgent(projectDir, opts).agent
+      });
+      if (!result.approved) {
+        console.log(chalk.gray('  Plan rejected.'));
+      } else {
+        printResult(result.result);
+      }
+      continue;
+    }
+
+    if (input === '/resume') {
+      const sessions = cm.listSessions(10);
+      if (sessions.length === 0) { console.log(chalk.gray('  No prior sessions.')); continue; }
+      try {
+        const { pick } = await inquirer.prompt([{
+          type: 'list', name: 'pick',
+          message: 'Resume which session?',
+          choices: sessions.map(s => ({ name: `${s.id}  ${s.summary}  (${new Date(s.createdAt).toLocaleString()})`, value: s.id }))
+        }]);
+        const data = cm.loadSession(pick);
+        if (data?.messages?.length) {
+          agent.messages = data.messages;
+          hasRun = true;
+          session = { id: data.id, createdAt: data.createdAt, projectDir };
+          console.log(chalk.green(`  Loaded ${data.messages.length} messages from ${pick}`));
+        }
+      } catch { /* cancelled */ }
+      continue;
+    }
+
     if (input === '/help') {
       console.log(chalk.gray(`
   Built-in slash commands:
-    /stats        — Thong ke tool calls
-    /files        — Files da thay doi
-    /undo         — Hoan tac thay doi file cuoi
-    /sessions     — Danh sach sessions gan day
-    /tokens       — Token usage + cache hit rate
-    /mcp          — MCP server status
-    /cache on|off — Bat/tat prompt caching
-    /exit         — Thoat
-    /help         — Hien help
+    /stats            — Thong ke tool calls
+    /files            — Files da thay doi
+    /undo             — Hoan tac thay doi file cuoi
+    /sessions         — Danh sach sessions gan day
+    /resume           — Chon session cu de load lai
+    /tokens, /cost    — Token usage + cache hit + cost
+    /budget           — Ngan sach da dung
+    /compact          — Nen messages ve 40% budget
+    /init [--force]   — Tao CLAUDE.md tu repo scan
+    /plan <task>      — Analyze + approval truoc khi execute
+    /mcp              — MCP server status
+    /cache on|off     — Bat/tat prompt caching
+    /exit             — Thoat
+    /help             — Hien help
 
   Tip:
-    @path/to/file — attach file content vao prompt
-    @"file with spaces.txt" — quoted path
+    @path/to/file      — attach file content vao prompt
+    @"file with spaces" — quoted path
+    Shortcut flags:   orcai --resume, --plan, --budget 0.50, --direct, -y, --no-hooks
 
   Custom commands (tu skills/ va .claude/commands/):
 ${formatCommandList(customCommands)}

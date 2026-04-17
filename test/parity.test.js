@@ -287,6 +287,124 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(res.error.includes('Sensitive'));
   });
 
+  // --- Budget tracker ---
+  test('budget computes cost from usage', () => {
+    const { BudgetTracker, computeCost } = require('../lib/budget');
+    const cost = computeCost('smart', {
+      prompt_tokens: 1000,
+      cache_creation_input_tokens: 500,
+      cache_read_input_tokens: 2000,
+      completion_tokens: 500
+    });
+    // $3 * 1000/1M + $3.75 * 500/1M + $0.30 * 2000/1M + $15 * 500/1M
+    // = 0.003 + 0.001875 + 0.0006 + 0.0075 = 0.012975
+    assert(cost > 0.012 && cost < 0.014, `expected ~0.013, got ${cost}`);
+  });
+
+  test('budget enforces cap', () => {
+    const { BudgetTracker } = require('../lib/budget');
+    const b = new BudgetTracker({ capUsd: 0.01, model: 'smart' });
+    assert(!b.isExceeded());
+    b.record('smart', { prompt_tokens: 10000, completion_tokens: 1000 });
+    // cost = $0.03 + $0.015 = $0.045 > $0.01
+    assert(b.isExceeded());
+  });
+
+  // --- Hooks ---
+  test('hooks runner loads config', () => {
+    const { HookRunner } = require('../lib/hooks');
+    const hr = new HookRunner({ projectDir: path.resolve(__dirname, '..') });
+    hr.load();
+    const stats = hr.getStats();
+    assert(typeof stats.PreToolUse === 'number');
+    assert(typeof stats.Stop === 'number');
+  });
+
+  await test('hooks runner executes commands and returns outputs', async () => {
+    const { HookRunner } = require('../lib/hooks');
+    const hr = new HookRunner({ projectDir: path.resolve(__dirname, '..') });
+    // Inject inline hook
+    hr._loaded = true;
+    hr.hooks.PreToolUse = [{
+      matcher: 'test_tool',
+      hooks: [{ type: 'command', command: process.platform === 'win32' ? 'echo hello' : "echo 'hello'" }]
+    }];
+    const res = await hr.run('PreToolUse', { toolName: 'test_tool' });
+    assert(!res.blocked);
+    assert(res.outputs.length === 1);
+    assert(res.outputs[0].stdout.includes('hello'));
+  });
+
+  await test('hooks PreToolUse blocks on non-zero exit', async () => {
+    const { HookRunner } = require('../lib/hooks');
+    const hr = new HookRunner({ projectDir: path.resolve(__dirname, '..') });
+    hr._loaded = true;
+    hr.hooks.PreToolUse = [{
+      matcher: '.*',
+      hooks: [{ type: 'command', command: process.platform === 'win32' ? 'exit 1' : 'exit 1' }]
+    }];
+    const res = await hr.run('PreToolUse', { toolName: 'any' });
+    assert(res.blocked, 'should block on exit 1');
+  });
+
+  // --- Repo cache ---
+  await test('repo-cache produces and caches summary', async () => {
+    const { RepoCache } = require('../lib/repo-cache');
+    const projectDir = path.resolve(__dirname, '..');
+    const cache = new RepoCache({ projectDir, ttlMs: 1000 });
+    cache.invalidate();
+    const s1 = await cache.getSummary();
+    assert(typeof s1 === 'string' && s1.length > 50);
+    const s2 = await cache.getSummary();
+    assert(s1 === s2, 'second call should return cached value');
+  });
+
+  // --- Init project ---
+  await test('initProject refuses overwrite without --force', async () => {
+    const { initProject } = require('../lib/init-project');
+    const projectDir = path.resolve(__dirname, '..');
+    // This project doesn't have a CLAUDE.md at root yet
+    const tmpFile = path.join(projectDir, 'CLAUDE.md');
+    const existed = fs.existsSync(tmpFile);
+    let createdNow = false;
+    try {
+      const res = await initProject(projectDir);
+      if (existed) {
+        assert(!res.created);
+        assert(res.reason.includes('exists'));
+      } else {
+        createdNow = res.created;
+      }
+    } finally {
+      if (createdNow && fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    }
+  });
+
+  // --- Plan mode smoke (no network, just exports) ---
+  test('plan-mode exports runPlanFlow', () => {
+    const { runPlanFlow } = require('../lib/plan-mode');
+    assert(typeof runPlanFlow === 'function');
+  });
+
+  // --- Agent loop new options surface ---
+  test('AgentLoop accepts budget + hooks options', () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const { BudgetTracker } = require('../lib/budget');
+    const { HookRunner } = require('../lib/hooks');
+    const b = new BudgetTracker({ capUsd: 1.0, model: 'smart' });
+    const h = new HookRunner({ projectDir: path.resolve(__dirname, '..') });
+    const agent = new AgentLoop({
+      projectDir: path.resolve(__dirname, '..'),
+      agentRole: 'builder',
+      budget: b,
+      hookRunner: h
+    });
+    assert(agent.budget === b);
+    assert(agent.hookRunner === h);
+    const stats = agent.getCacheStats();
+    assert(typeof stats.cost === 'object');
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

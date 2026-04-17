@@ -29,6 +29,12 @@ node_modules/
 .vscode/
 .idea/
 
+# Orcai local state (sessions, repo cache, shadow git logs)
+.orcai/
+.orcai/sessions/
+.orcai/repo-cache.json
+.orcai/shadow-git.log
+
 # SDD decisions (có thể chứa context nhạy cảm)
 .sdd/decisions.lock.json
 
