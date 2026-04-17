@@ -1471,6 +1471,106 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   // MODEL CALL (v2.1 — budget-aware)
   // =============================================
 
+  /**
+   * Goi vision model voi anh — content la array { type: 'text' | 'image_url' }.
+   * LiteLLM forward sang OpenAI vision format. Models support: fast (Gemini 3
+   * Flash), smart (Claude Sonnet 4.6), architect (Opus 4.6). Cheap/default
+   * thuong khong vision → auto-upgrade sang fast.
+   *
+   * @param {string} model - 'fast' / 'smart' / 'architect' (vision-capable)
+   * @param {string} systemPrompt - system message
+   * @param {string} userText - user text question
+   * @param {string[]} images - array of data:image/...;base64,... or http URLs
+   */
+  async callVisionModel(model, systemPrompt, userText, images = []) {
+    if (!images.length) return this._callModel(model, systemPrompt, userText);
+
+    // Vision capability check — neu model khong vision → auto-upgrade sang fast
+    const VISION_CAPABLE = new Set(['fast', 'smart', 'architect']);
+    const visionModel = VISION_CAPABLE.has(model) ? model : 'fast';
+    if (visionModel !== model) {
+      console.log(`👁️  Model "${model}" khong vision-capable → auto-upgrade "${visionModel}"`);
+    }
+
+    // Budget check + reserve
+    const budgetCheck = await this._withBudgetLock(() => this._checkBudget(visionModel, 5000));
+    if (budgetCheck.exhausted) {
+      throw new Error(`Budget exhausted: $${this.budgetTracker.spent.toFixed(2)} / $${this.dailyBudget}`);
+    }
+    const actualModel = budgetCheck.model;
+    const reservedCost = budgetCheck.reservedCost || 0;
+
+    // Build vision content array (OpenAI format — LiteLLM forward sang Gemini/Claude/etc)
+    const userContent = [
+      { type: 'text', text: userText || 'Phan tich anh nay.' },
+      ...images.slice(0, 4).map(url => ({  // Cap 4 anh / call de tranh blow context
+        type: 'image_url',
+        image_url: { url, detail: 'auto' }
+      }))
+    ];
+
+    const TIMEOUT_MS = parseInt(process.env.LITELLM_TIMEOUT_MS) || 120000; // Vision cham hon
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+    try {
+      // Vision max_tokens 2000 (giam tu 3000) — fit OpenRouter free tier credit
+      const VISION_MAX_TOKENS = parseInt(process.env.VISION_MAX_TOKENS) || 2000;
+      const response = await fetch(`${this.litellmUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${this.litellmKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: actualModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+          ],
+          max_tokens: VISION_MAX_TOKENS,
+          temperature: 0.3
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      const data = await response.json();
+
+      if (data.error) {
+        const errMsg = data.error.message || JSON.stringify(data.error);
+        // Refund truoc khi check credit downgrade
+        if (reservedCost > 0) {
+          await this._withBudgetLock(() => {
+            this.budgetTracker.spent = Math.max(0, this.budgetTracker.spent - reservedCost);
+          });
+        }
+        // Auto-downgrade neu credit insufficient — fast la model vision re nhat,
+        // khong xuong duoc thap hon trong vision tier. Throw clear message.
+        const isCreditErr = /requires more credits|credit_balance|insufficient.*balance|credit.*low/i.test(errMsg);
+        if (isCreditErr) {
+          throw new Error(`Het credit cho vision model "${actualModel}". Toi-up OpenRouter hoac giam VISION_MAX_TOKENS env (hien tai ${VISION_MAX_TOKENS})`);
+        }
+        throw new Error(errMsg);
+      }
+
+      // Track actual cost
+      const usage = data.usage || {};
+      const totalTokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+      await this._withBudgetLock(() => this._trackCost(actualModel, totalTokens || 5000, reservedCost));
+
+      return {
+        text: data.choices?.[0]?.message?.content || '',
+        model: actualModel,
+        usage: { tokens: totalTokens, prompt: usage.prompt_tokens, completion: usage.completion_tokens }
+      };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (reservedCost > 0) {
+        await this._withBudgetLock(() => {
+          this.budgetTracker.spent = Math.max(0, this.budgetTracker.spent - reservedCost);
+        });
+      }
+      throw err;
+    }
+  }
+
   async _callModel(model, systemPrompt, userContent) {
     // Budget check truoc khi goi — dung lock tranh race condition
     const budgetCheck = await this._withBudgetLock(() => this._checkBudget(model));

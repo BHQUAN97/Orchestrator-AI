@@ -68,7 +68,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5001,h
 
 // === Rate Limiter — sliding window per IP ===
 const MAX_REQUESTS_PER_MINUTE = parseInt(process.env.RATE_LIMIT || '60');
-const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB — cho phep image upload (4 anh × ~1.5MB base64)
 const RATE_MAP_MAX_ENTRIES = parseInt(process.env.RATE_MAP_MAX || '10000');
 const rateLimitMap = new Map(); // IP → { count, resetAt }
 
@@ -523,6 +523,53 @@ const server = http.createServer(async (req, res) => {
         return json(res, { rolled_back: true, hash, project: projectDir });
       } catch (err) {
         return error(res, 500, `Rollback failed: ${err.message}`);
+      }
+    }
+
+    // POST /api/vision — direct vision LLM call (KHONG pipeline scan/plan/execute)
+    // Body: { prompt, images: ['data:image/...;base64,...' or URL], model? }
+    // Validate: max 4 images, max 5MB per image (base64-decoded). Auto-route fast model.
+    if (url.pathname === '/api/vision') {
+      if (!body.prompt && !body.images?.length) {
+        return error(res, 400, 'Need at least "prompt" or "images"');
+      }
+      const images = Array.isArray(body.images) ? body.images.slice(0, 4) : [];
+      const MAX_BYTES = 5 * 1024 * 1024; // 5MB per image
+      for (const [i, img] of images.entries()) {
+        if (typeof img !== 'string') return error(res, 400, `Image ${i}: must be string (data URL or http URL)`);
+        // Validate data URL format
+        if (img.startsWith('data:')) {
+          const m = img.match(/^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/i);
+          if (!m) return error(res, 400, `Image ${i}: invalid data URL format (need jpeg/png/webp/gif base64)`);
+          // Approx decoded size = base64.length * 3/4
+          const decodedSize = Math.floor(m[2].length * 3 / 4);
+          if (decodedSize > MAX_BYTES) return error(res, 413, `Image ${i}: ${Math.round(decodedSize/1024)}KB exceeds 5MB limit`);
+        } else if (!img.startsWith('http://') && !img.startsWith('https://')) {
+          return error(res, 400, `Image ${i}: must be data URL or http(s) URL`);
+        }
+      }
+
+      const visionPrompt = body.prompt || 'Phan tich anh nay chi tiet.';
+      const visionModel = body.model || 'fast';
+      const systemPrompt = `Ban la chuyen gia phan tich hinh anh. Tra loi ngan gon, chinh xac, tieng Viet.
+Neu user dua screenshot UI/code: chi ra van de + de xuat fix cu the.
+Neu diagram/architecture: giai thich + danh gia.
+Neu loi/error: chan doan + cach sua.`;
+
+      try {
+        const start = Date.now();
+        const result = await orchestrator.callVisionModel(visionModel, systemPrompt, visionPrompt, images);
+        return json(res, {
+          success: true,
+          analysis: result.text,
+          model: result.model,
+          tokens: result.usage?.tokens || 0,
+          images_count: images.length,
+          elapsed_ms: Date.now() - start,
+          budget: orchestrator.getBudgetStatus()
+        });
+      } catch (err) {
+        return error(res, 500, `Vision call failed: ${err.message}`);
       }
     }
 

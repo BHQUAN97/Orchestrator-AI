@@ -186,6 +186,38 @@ assert('Spent increased after reserve', agent.budgetTracker.spent > before);
 agent.budgetTracker.spent = Math.max(0, agent.budgetTracker.spent - reserved);
 assert('Spent restored after refund', agent.budgetTracker.spent === before);
 
+// === Vision endpoint validation (round 6) ===
+console.log('\n=== Vision data URL validation ===\n');
+
+// Validate logic theo /api/vision endpoint
+const VALID_DATA_URLS = [
+  'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+  'data:image/png;base64,iVBORw0KGgo=',
+  'data:image/webp;base64,UklGRg==',
+  'data:image/gif;base64,R0lGODlh',
+];
+const INVALID_DATA_URLS = [
+  'not-a-url',
+  'data:text/plain;base64,SGVsbG8=', // not image
+  'data:image/bmp;base64,Qk0=', // unsupported format
+  'data:image/jpeg,raw-not-base64',
+  'http://example.com/img.jpg', // http URL — separate path, OK in endpoint logic
+];
+
+const dataUrlRegex = /^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/i;
+
+for (const url of VALID_DATA_URLS) {
+  assert(`Valid data URL: ${url.slice(0, 30)}...`, dataUrlRegex.test(url));
+}
+for (const url of INVALID_DATA_URLS.slice(0, 4)) {
+  assert(`Invalid data URL rejected: ${url.slice(0, 30)}...`, !dataUrlRegex.test(url));
+}
+
+// Test b64 size estimation
+const testB64 = 'A'.repeat(1000); // 1000 chars
+const decodedSize = Math.floor(testB64.length * 3 / 4);
+assert('Base64 size estimate (3/4 ratio)', decodedSize === 750);
+
 // === Credit error detection (round 5) ===
 console.log('\n=== Credit downgrade regex ===\n');
 

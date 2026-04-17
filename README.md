@@ -316,6 +316,17 @@ curl -X DELETE http://localhost:5003/api/templates/fix-mobile # delete
 curl http://localhost:5003/api/rollback/list?project=FashionEcom
 curl -X POST http://localhost:5003/api/rollback \
   -d '{"project":"FashionEcom","hash":"abc123de"}'
+
+# === Vision (analyze image — Gemini 3 Flash, ~3s, ~$0.0004/call) ===
+# Phan tich screenshot UI bug, diagram, error message...
+curl -X POST http://localhost:5003/api/vision \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Sua bug layout trong screenshot",
+    "images": ["data:image/jpeg;base64,/9j/4AAQ..."]
+  }'
+# Response: { success, analysis, model, tokens, elapsed_ms, budget }
+# Constraints: max 4 images, 5MB/image, format jpeg/png/webp/gif
 ```
 
 ### Environment variables (v2.2 mới)
@@ -328,6 +339,7 @@ curl -X POST http://localhost:5003/api/rollback \
 | `RATE_MAP_MAX` | `10000` | Max IP entries trong rate-limit map |
 | `NOTIFY_WEBHOOK_URL` | — | Slack/Discord webhook khi run complete + rollback |
 | `AUTH_USERNAME/PASSWORD/JWT_SECRET` | (admin/admin/dev) | Production REQUIRES set, không dùng default |
+| `VISION_MAX_TOKENS` | `2000` | Max tokens cho vision response (giảm nếu hết credit) |
 
 ### Via LiteLLM API directly
 
