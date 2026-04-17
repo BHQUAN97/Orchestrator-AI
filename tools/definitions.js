@@ -257,6 +257,29 @@ const TOOLS = [
     }
   },
 
+  // === MCP RESOURCES ===
+  {
+    type: 'function',
+    function: {
+      name: 'read_mcp_resource',
+      description: 'Doc MCP resource theo server name + uri. Resources la file/data do MCP server expose (vd: file system entries, database tables). Dung /mcp de xem danh sach server hien co.',
+      parameters: {
+        type: 'object',
+        properties: {
+          server: {
+            type: 'string',
+            description: 'Ten MCP server (vd: filesystem, github, memory)'
+          },
+          uri: {
+            type: 'string',
+            description: 'URI cua resource (vd: file:///path, resource://...)'
+          }
+        },
+        required: ['server', 'uri']
+      }
+    }
+  },
+
   // === SUBAGENT ===
   {
     type: 'function',

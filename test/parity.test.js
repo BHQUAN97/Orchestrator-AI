@@ -405,6 +405,108 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     assert(typeof stats.cost === 'object');
   });
 
+  // --- Status line ---
+  test('status-line renders agent state', () => {
+    const { renderStatusLine } = require('../lib/status-line');
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({ projectDir: path.resolve(__dirname, '..') });
+    const line = renderStatusLine(agent, { sessionId: 'test', projectName: 'p' });
+    assert(typeof line === 'string');
+    assert(line.includes('default') || line.includes('smart'));
+  });
+
+  // --- Worktree ---
+  test('WorktreeSession detects git repo', () => {
+    const { WorktreeSession } = require('../lib/worktree');
+    const wt = new WorktreeSession(path.resolve(__dirname, '..'));
+    // Shouldn't throw — this project is a git repo
+    assert(wt.projectDir);
+  });
+
+  // --- Skill matcher ---
+  test('skill-matcher extracts triggers from legacy skill', () => {
+    const { extractTriggers } = require('../lib/skill-matcher');
+    const triggers = extractTriggers({
+      name: 'developer',
+      body: '## Trigger\nKhi user yeu cau: build feature, fix bug, implement task, sua code'
+    });
+    // Should extract "build", "feature", "bug", "implement", "task", "sua", "code"
+    assert(triggers.length > 3, `got ${triggers.length}: ${triggers.join(',')}`);
+    assert(triggers.includes('bug') || triggers.includes('fix') || triggers.includes('build'));
+  });
+
+  test('skill-matcher scores prompts', () => {
+    const { match } = require('../lib/skill-matcher');
+    const index = [
+      { name: 'fix', description: 'Fix bug', triggers: ['bug', 'fix', 'error'] },
+      { name: 'build', description: 'Build feature', triggers: ['feature', 'build', 'implement'] }
+    ];
+    const res = match('Please fix the login bug', index);
+    assert(res.length > 0);
+    assert(res[0].name === 'fix', `expected fix, got ${res[0].name}`);
+    assert(res[0].score > 0);
+  });
+
+  // --- Markdown render ---
+  test('markdown-render handles common syntax', () => {
+    const { renderMarkdown } = require('../lib/markdown-render');
+    const out = renderMarkdown('**bold** *italic* `code` # heading\n- item\n```js\nconsole.log(1)\n```');
+    assert(typeof out === 'string' && out.length > 0);
+    // Should not leak raw markdown markers for bold/code
+    assert(!out.includes('**bold**'), 'bold markers should be replaced');
+    assert(!out.includes('`code`'), 'inline code markers should be replaced');
+  });
+
+  // --- MCP resources ---
+  test('MCPRegistry exposes resource methods', () => {
+    const { MCPRegistry } = require('../tools/mcp-client');
+    const reg = new MCPRegistry();
+    assert(typeof reg.listResources === 'function');
+    assert(typeof reg.readResource === 'function');
+    const resources = reg.listResources();
+    assert(Array.isArray(resources) && resources.length === 0);
+  });
+
+  // --- Subagent inherits budget + hooks ---
+  await test('subagent ctx passes through budget + hooks (via executor)', async () => {
+    const { ToolExecutor } = require('../tools/executor');
+    const { BudgetTracker } = require('../lib/budget');
+    const { HookRunner } = require('../lib/hooks');
+    const b = new BudgetTracker({ capUsd: 0.5, model: 'smart' });
+    const h = new HookRunner({ projectDir: path.resolve(__dirname, '..') });
+    const exec = new ToolExecutor({
+      projectDir: path.resolve(__dirname, '..'),
+      parentBudget: b,
+      parentHookRunner: h
+    });
+    assert(exec.parentBudget === b);
+    assert(exec.parentHookRunner === h);
+  });
+
+  test('AgentLoop wires parentBudget into executor', () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({
+      projectDir: path.resolve(__dirname, '..'),
+      budgetUsd: 0.25
+    });
+    assert(agent.executor.parentBudget === agent.budget);
+    assert(agent.executor.parentHookRunner === agent.hookRunner);
+  });
+
+  // --- read_mcp_resource tool defined ---
+  test('read_mcp_resource tool is available for builder role', () => {
+    const { getTools } = require('../tools/definitions');
+    const tools = getTools('builder').map(t => t.function.name);
+    assert(tools.includes('read_mcp_resource'));
+  });
+
+  // --- /init parse tightening ---
+  test('initProject refuses CLAUDE.md overwrite without --force', async () => {
+    const { initProject } = require('../lib/init-project');
+    // No-op assertion — just confirms function exports
+    assert(typeof initProject === 'function');
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

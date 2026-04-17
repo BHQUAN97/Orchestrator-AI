@@ -33,6 +33,10 @@ class ToolExecutor {
     // MCP registry (optional)
     this.mcpRegistry = options.mcpRegistry || null;
 
+    // Parent budget + hook runner — share voi subagent neu co
+    this.parentBudget = options.parentBudget || null;
+    this.parentHookRunner = options.parentHookRunner || null;
+
     // Diff approval callback — goi truoc write/edit trong interactive mode
     // Signature: (filePath, before, after) => 'yes' | 'no' | 'abort'
     this.onWriteApproval = options.onWriteApproval || null;
@@ -65,8 +69,15 @@ class ToolExecutor {
         projectDir: this.projectDir,
         litellmUrl: this.litellmUrl,
         litellmKey: this.litellmKey,
-        parentDepth: this.subagentDepth
+        parentDepth: this.subagentDepth,
+        budget: this.parentBudget,         // share parent budget cap
+        hookRunner: this.parentHookRunner, // share parent hook runner
+        mcpRegistry: this.mcpRegistry      // share MCP
       }),
+      'read_mcp_resource': async (args) => {
+        if (!this.mcpRegistry) return { success: false, error: 'No MCP registry configured' };
+        return await this.mcpRegistry.readResource(args.server, args.uri);
+      },
       'task_complete':   (args) => this._handleTaskComplete(args)
     };
 

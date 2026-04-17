@@ -46,6 +46,8 @@ class MCPClient {
     this.pending = new Map();
     this.buffer = '';
     this.tools = [];
+    this.resources = [];
+    this.prompts = [];
     this.initialized = false;
     this.startError = null;
   }
@@ -106,6 +108,18 @@ class MCPClient {
           if (toolsRes.error) throw new Error(`tools/list: ${toolsRes.error.message}`);
           this.tools = toolsRes.result?.tools || [];
 
+          // Resources (optional — many servers don't implement)
+          try {
+            const resRes = await this._rpc('resources/list', {});
+            if (!resRes.error) this.resources = resRes.result?.resources || [];
+          } catch { this.resources = []; }
+
+          // Prompts (optional)
+          try {
+            const promptRes = await this._rpc('prompts/list', {});
+            if (!promptRes.error) this.prompts = promptRes.result?.prompts || [];
+          } catch { this.prompts = []; }
+
           clearTimeout(onTimeout);
           resolve();
         } catch (e) {
@@ -116,6 +130,15 @@ class MCPClient {
         }
       })();
     });
+  }
+
+  async readResource(uri) {
+    if (!this.initialized) throw new Error(`MCP ${this.name}: not initialized`);
+    const res = await this._rpc('resources/read', { uri });
+    if (res.error) return { success: false, error: res.error.message };
+    const contents = res.result?.contents || [];
+    const text = contents.filter(c => c.text).map(c => c.text).join('\n');
+    return { success: true, content: text || '(no text content)', mimeType: contents[0]?.mimeType };
   }
 
   async callTool(toolName, args) {
@@ -299,6 +322,32 @@ class MCPRegistry {
       return await entry.client.callTool(entry.origName, args);
     } catch (e) {
       return { success: false, error: `MCP call failed: ${e.message}` };
+    }
+  }
+
+  /**
+   * Liet ke resources tren cac MCP server
+   */
+  listResources() {
+    const out = [];
+    for (const [name, client] of this.clients) {
+      for (const r of (client.resources || [])) {
+        out.push({ server: name, uri: r.uri, name: r.name, description: r.description, mimeType: r.mimeType });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Doc resource tu server cu the
+   */
+  async readResource(serverName, uri) {
+    const client = this.clients.get(serverName);
+    if (!client) return { success: false, error: `MCP server not found: ${serverName}` };
+    try {
+      return await client.readResource(uri);
+    } catch (e) {
+      return { success: false, error: `Read resource failed: ${e.message}` };
     }
   }
 

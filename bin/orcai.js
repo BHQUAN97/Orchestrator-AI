@@ -34,6 +34,10 @@ const { BudgetTracker } = require('../lib/budget');
 const { HookRunner } = require('../lib/hooks');
 const { runPlanFlow } = require('../lib/plan-mode');
 const { initProject } = require('../lib/init-project');
+const { renderStatusLine } = require('../lib/status-line');
+const { WorktreeSession } = require('../lib/worktree');
+const { suggestSkills } = require('../lib/skill-matcher');
+const { renderMarkdown } = require('../lib/markdown-render');
 
 // === CLI Setup ===
 const program = new Command();
@@ -61,6 +65,9 @@ program
   .option('--no-hooks', 'Disable hooks (PreToolUse/PostToolUse/Stop)')
   .option('--no-repo-cache', 'Force re-scan repo (skip repo-cache.json)')
   .option('--mcp-config <path>', 'Path to additional MCP config JSON')
+  .option('--worktree', 'Run agent in isolated git worktree (safer for destructive ops)')
+  .option('--no-markdown', 'Disable markdown rendering in output')
+  .option('--no-status-line', 'Hide status line in interactive mode')
   .action(async (promptParts, opts) => {
     const prompt = promptParts.join(' ').trim();
     const projectDir = path.resolve(opts.project);
@@ -74,6 +81,20 @@ program
 
     // Banner
     printBanner(projectDir, opts.model, opts.role);
+
+    // Worktree isolation: relocate projectDir to worktree path
+    let worktreeSession = null;
+    if (opts.worktree) {
+      try {
+        worktreeSession = new WorktreeSession(projectDir);
+        const wt = worktreeSession.create();
+        console.log(chalk.cyan(`  🌿 Worktree: ${wt.path} (branch: ${wt.branch})`));
+        projectDir = wt.path;
+      } catch (e) {
+        console.log(chalk.red(`  ✗ Worktree failed: ${e.message}`));
+        process.exit(1);
+      }
+    }
 
     // Init MCP (async, best-effort — khong block neu server loi)
     const mcpRegistry = opts.mcp === false ? null : await initMCP(projectDir, opts);
@@ -110,6 +131,20 @@ program
 
     // Cleanup
     if (mcpRegistry) await mcpRegistry.shutdown();
+
+    // Worktree cleanup
+    if (worktreeSession && worktreeSession.created) {
+      const hasChanges = worktreeSession.hasChanges();
+      if (hasChanges) {
+        console.log(chalk.yellow(`\n  🌿 Worktree has changes at: ${worktreeSession.worktreePath}`));
+        console.log(chalk.gray(`     Branch: ${worktreeSession.branch}`));
+        console.log(chalk.gray(`     Review then merge: cd ${projectDir} && git log ${worktreeSession.branch}`));
+        console.log(chalk.gray(`     Cleanup when done: git worktree remove "${worktreeSession.worktreePath}" && git branch -D ${worktreeSession.branch}`));
+      } else {
+        worktreeSession.cleanup({ deleteBranch: true });
+        console.log(chalk.gray('  🌿 Worktree clean, auto-removed.'));
+      }
+    }
   });
 
 // === MCP Init ===
@@ -306,7 +341,8 @@ function createAgent(projectDir, opts) {
 
     onText: (text) => {
       if (spinner) spinner.stop();
-      console.log('\n' + chalk.white(text));
+      const rendered = opts.markdown === false ? text : renderMarkdown(text);
+      process.stdout.write(rendered);
     },
 
     onError: (err) => {
@@ -439,6 +475,15 @@ async function interactiveMode(projectDir, opts) {
   };
 
   while (true) {
+    // Status line — hien thi state truoc prompt
+    if (opts.statusLine !== false && hasRun) {
+      const line = renderStatusLine(agent, {
+        sessionId: session.id,
+        projectName: path.basename(projectDir)
+      });
+      if (line) console.log(line);
+    }
+
     let input;
     try {
       const answer = await inquirer.prompt([{
@@ -453,6 +498,17 @@ async function interactiveMode(projectDir, opts) {
     }
 
     if (!input) continue;
+
+    // Suggest matching skills (non-intrusive) — chi khi prompt la text thuong, khong slash
+    if (!input.startsWith('/')) {
+      try {
+        const matches = suggestSkills(input, projectDir, 2);
+        if (matches.length > 0 && matches[0].score >= 0.3) {
+          const m = matches[0];
+          console.log(chalk.gray(`  💡 matching skill: /${m.name} (score ${m.score}, keywords: ${m.matched.slice(0, 3).join(', ')})`));
+        }
+      } catch { /* ignore matcher errors */ }
+    }
 
     // Slash commands
     if (input === '/exit' || input === '/quit') break;
@@ -540,8 +596,8 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
-    if (input.startsWith('/init')) {
-      const force = input.includes(' --force');
+    if (input === '/init' || input.startsWith('/init ')) {
+      const force = input.includes('--force');
       const res = await initProject(projectDir, { force });
       if (res.created) {
         console.log(chalk.green(`  ✓ Generated ${res.path} — ${res.stats.lines} lines`));

@@ -49,11 +49,11 @@ const SUBAGENT_PROFILES = {
 /**
  * Chay subagent
  * @param {{ description: string, prompt: string, subagent_type?: string }} args
- * @param {{ projectDir: string, litellmUrl: string, litellmKey: string, parentDepth?: number }} ctx
+ * @param {{ projectDir, litellmUrl, litellmKey, parentDepth?, budget?, hookRunner?, mcpRegistry? }} ctx
  */
 async function spawnSubagent(args, ctx) {
   const { description, prompt, subagent_type = 'general-purpose' } = args;
-  const { projectDir, litellmUrl, litellmKey, parentDepth = 0 } = ctx;
+  const { projectDir, litellmUrl, litellmKey, parentDepth = 0, budget, hookRunner, mcpRegistry } = ctx;
 
   if (!prompt) return { success: false, error: 'Missing prompt' };
 
@@ -92,7 +92,12 @@ Rules:
       projectDir,
       agentRole: profile.role,
       maxIterations: profile.maxIter,
-      streaming: false // Subagent khong stream — chi tra ket qua cuoi
+      streaming: false, // Subagent khong stream — chi tra ket qua cuoi
+      // Inherit parent resources: budget cap, hooks, MCP
+      budget: budget || undefined,       // undefined → AgentLoop creates unlimited new tracker
+      hookRunner: hookRunner || undefined,
+      mcpRegistry: mcpRegistry || null,
+      subagentDepth: parentDepth + 1
     });
 
     // Child moi khi metadata de tracking
