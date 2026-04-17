@@ -186,6 +186,31 @@ assert('Spent increased after reserve', agent.budgetTracker.spent > before);
 agent.budgetTracker.spent = Math.max(0, agent.budgetTracker.spent - reserved);
 assert('Spent restored after refund', agent.budgetTracker.spent === before);
 
+// === Credit error detection (round 5) ===
+console.log('\n=== Credit downgrade regex ===\n');
+
+const CREDIT_ERRORS = [
+  'litellm.APIError: APIError: OpenAIException - This request requires more credits, or fewer max_tokens',
+  'Error: credit_balance_too_low',
+  'insufficient balance detected',
+  'your credit is low',
+  'Credit Balance too low'
+];
+const NON_CREDIT_ERRORS = [
+  '429 Rate limit exceeded',
+  'ECONNREFUSED',
+  'timeout waiting response',
+  'Invalid JSON parse'
+];
+const regex = /requires more credits|credit_balance|insufficient.*balance|credit.*low/i;
+
+for (const msg of CREDIT_ERRORS) {
+  assert(`Detect credit err: "${msg.slice(0, 40)}..."`, regex.test(msg));
+}
+for (const msg of NON_CREDIT_ERRORS) {
+  assert(`NOT credit err: "${msg.slice(0, 40)}..."`, !regex.test(msg));
+}
+
 // === New endpoints helpers (round 4) ===
 console.log('\n=== Helpers cho new endpoints ===\n');
 

@@ -472,19 +472,37 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // POST /api/estimate — uoc tinh chi phi truoc khi run (dung SLM classify + plan)
+    // POST /api/estimate — uoc tinh re truoc khi run.
+    // ?accurate=1 → goi plan() that (5-10s, ton smart model). Default heuristic
+    // (200-500ms, chi SLM classify) — nhanh hon 18-20×.
     if (url.pathname === '/api/estimate') {
       if (!body.prompt) return error(res, 400, 'Missing "prompt"');
+      const accurate = url.searchParams.get('accurate') === '1' || body.accurate === true;
       try {
-        const plan = await orchestrator.plan(body.prompt, {
+        if (accurate) {
+          const plan = await orchestrator.plan(body.prompt, {
+            files: sanitizeFileList(body.files),
+            project: String(body.project || '').slice(0, 500),
+            task: body.task || 'build'
+          });
+          return json(res, {
+            estimate: orchestrator._estimatePlanCost(plan),
+            plan_summary: plan.analysis,
+            subtasks: plan.subtasks?.length || 0,
+            method: 'plan',
+            budget_remaining: orchestrator.getBudgetStatus().remaining
+          });
+        }
+        // Default: cheap heuristic
+        const est = await orchestrator.cheapEstimate(body.prompt, {
           files: sanitizeFileList(body.files),
           project: String(body.project || '').slice(0, 500),
           task: body.task || 'build'
         });
         return json(res, {
-          estimate: orchestrator._estimatePlanCost(plan),
-          plan_summary: plan.analysis,
-          subtasks: plan.subtasks?.length || 0,
+          estimate: est,
+          subtasks: est.subtasks,
+          classification: est.classification,
           budget_remaining: orchestrator.getBudgetStatus().remaining
         });
       } catch (err) {

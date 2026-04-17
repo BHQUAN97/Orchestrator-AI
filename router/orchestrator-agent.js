@@ -633,6 +633,50 @@ class OrchestratorAgent {
   }
 
   /**
+   * Cheap estimate: chi goi SLM classifier + heuristic, KHONG goi planner LLM.
+   * Dung cho /api/estimate khi user muon check cost truoc khi run that.
+   * 18-20× re hon goi plan() (200-500ms vs 5-10s + cost smart model).
+   */
+  async cheapEstimate(userPrompt, context = {}) {
+    const cls = await this._classifyTask(userPrompt, context);
+    const complexity = cls?.complexity || 'medium';
+    const intent = cls?.intent || 'build';
+    const domain = cls?.domain || 'fullstack';
+
+    // Heuristic so subtask theo complexity
+    const SUBTASK_COUNT = { simple: 1, medium: 2, complex: 3, expert: 4, very_high: 4, high: 3, low: 1 };
+    const numSubtasks = SUBTASK_COUNT[complexity] || 2;
+
+    // Heuristic model tier theo intent + complexity (tu SLM mapping cua slm-classifier.js)
+    const KEY = `${intent}:${complexity}`;
+    const TIER_BY_INTENT = {
+      'docs': 'cheap', 'review': 'fast', 'fix': 'default', 'build': 'default',
+      'test': 'default', 'refactor': 'default', 'debug': 'smart', 'architect': 'architect'
+    };
+    let tier = TIER_BY_INTENT[intent] || 'default';
+    if (complexity === 'expert' || complexity === 'very_high') tier = 'architect';
+    else if (complexity === 'complex' || complexity === 'high') tier = (tier === 'cheap' || tier === 'fast') ? 'default' : tier;
+
+    // Avg tokens per subtask theo tier (estimate)
+    const TOKENS_PER_SUBTASK = { architect: 6000, smart: 4000, default: 3000, fast: 2000, cheap: 1500 };
+    const tokensPerTask = TOKENS_PER_SUBTASK[tier] || 3000;
+    const totalTokens = tokensPerTask * numSubtasks;
+    const costPer1K = MODEL_COST_PER_1K[tier] || 0.001;
+    const totalCost = costPer1K * (totalTokens / 1000);
+
+    return {
+      total_tokens: totalTokens,
+      total_cost: `$${totalCost.toFixed(4)}`,
+      total_cost_raw: totalCost,
+      by_model: { [tier]: { tokens: totalTokens, cost: totalCost, count: numSubtasks } },
+      subtasks: numSubtasks,
+      classification: { intent, complexity, domain },
+      method: 'heuristic',  // Phan biet voi _estimatePlanCost dung plan thuc
+      note: 'Estimate dua tren SLM classify + heuristic. Dung dry-run de co plan that.'
+    };
+  }
+
+  /**
    * Lay history executions gan day — dung cho /api/history endpoint
    */
   getHistory(limit = 20, project = null) {
@@ -1452,13 +1496,14 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   }
 
   async _callModelWithRetry(model, systemPrompt, userContent, retries, reservedCost = 0) {
-    // Dynamic max_tokens theo model tier
+    // Dynamic max_tokens theo model tier — giam smart 6000→3000 de fit OpenRouter
+    // free tier (~1751 credit). Architect giu 8000 vi rare + cost trade-off OK.
     const MAX_TOKENS = {
-      'architect': 8000,  // Opus can nhieu token cho system design
-      'smart':     6000,  // Sonnet cho review/debug
-      'default':   4000,  // DeepSeek cho build
-      'fast':      3000,  // Gemini cho scan/review
-      'cheap':     2000   // GPT Mini cho docs/scan
+      'architect': 8000,
+      'smart':     3000,  // Sonnet — giam tu 6000 de tranh "requires more credits"
+      'default':   4000,
+      'fast':      3000,
+      'cheap':     2000
     };
     const maxTokens = MAX_TOKENS[model] || 4000;
 
@@ -1505,6 +1550,29 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
 
     if (data.error) {
       const errMsg = data.error.message || JSON.stringify(data.error);
+
+      // Auto-downgrade khi provider bao thieu credit/balance — switch sang model re hon.
+      // OpenRouter: "requires more credits, or fewer max_tokens".
+      // Anthropic: "credit_balance_too_low".
+      const isCreditErr = /requires more credits|credit_balance|insufficient.*balance|credit.*low/i.test(errMsg);
+      if (retries > 0 && isCreditErr) {
+        const DOWNGRADE = ['architect', 'smart', 'default', 'fast', 'cheap'];
+        const idx = DOWNGRADE.indexOf(model);
+        if (idx >= 0 && idx < DOWNGRADE.length - 1) {
+          const cheaperModel = DOWNGRADE[idx + 1];
+          console.log(`💸 Credit insufficient cho "${model}" → auto-downgrade "${cheaperModel}"`);
+          // Refund reserved cua model cu, _callModel se reserve lai cho model moi qua _checkBudget
+          if (reservedCost > 0) {
+            await this._withBudgetLock(() => {
+              this.budgetTracker.spent = Math.max(0, this.budgetTracker.spent - reservedCost);
+            });
+          }
+          // Re-enter qua _callModel (de _checkBudget reserve dung cost cho model moi)
+          return this._callModel(cheaperModel, systemPrompt, userContent);
+        }
+      }
+
+      // Rate limit retry voi backoff
       if (retries > 0 && (errMsg.includes('429') || errMsg.includes('RateLimit') || errMsg.includes('quota'))) {
         const waitSec = Math.min(30, 2 ** (4 - retries));
         console.log(`⏳ Rate limited, waiting ${waitSec}s... (${retries} retries left)`);
