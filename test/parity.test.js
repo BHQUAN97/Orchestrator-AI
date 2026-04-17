@@ -1201,6 +1201,84 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  // --- Self-healer ---
+  test('SelfHealer observes success without side effect', () => {
+    const { SelfHealer } = require('../lib/self-healer');
+    const h = new SelfHealer();
+    const r = h.observe('read_file', { path: 'x.js' }, { content: JSON.stringify({ success: true }) });
+    assert(r === null);
+    assert(h.getStats().observed === 1);
+    assert(h.getStats().active_streaks === 0);
+  });
+
+  test('SelfHealer auto-saves gotcha after 3 repeated failures', () => {
+    const { SelfHealer } = require('../lib/self-healer');
+    const saved = [];
+    const fakeStore = { append: (e) => { saved.push(e); return e; } };
+    const h = new SelfHealer({ memoryStore: fakeStore });
+    const args = { cmd: 'bad-command' };
+    const errResult = { content: JSON.stringify({ success: false, error: 'ENOENT: no such file' }) };
+    h.observe('execute_command', args, errResult);
+    h.observe('execute_command', args, errResult);
+    const suggestion = h.observe('execute_command', args, errResult);
+    assert(suggestion !== null, 'expected suggestion after 3rd failure');
+    assert(suggestion.type === 'gotcha');
+    assert(saved.length === 1);
+    assert(saved[0].type === 'gotcha');
+    assert(saved[0].count === 3);
+  });
+
+  test('SelfHealer saves recovery when success follows failures', () => {
+    const { SelfHealer } = require('../lib/self-healer');
+    const saved = [];
+    const fakeStore = { append: (e) => { saved.push(e); return e; } };
+    const h = new SelfHealer({ memoryStore: fakeStore });
+    const args = { path: 'file.js' };
+    h.observe('read_file', args, { content: JSON.stringify({ success: false, error: 'ENOENT' }) });
+    h.observe('read_file', args, { content: JSON.stringify({ success: false, error: 'ENOENT' }) });
+    h.observe('read_file', args, { content: JSON.stringify({ success: true }) });
+    assert(saved.length === 1);
+    assert(saved[0].type === 'lesson');
+  });
+
+  test('SelfHealer consumeSuggestion pops from queue', () => {
+    const { SelfHealer } = require('../lib/self-healer');
+    const h = new SelfHealer();
+    const args = {};
+    const err = { content: JSON.stringify({ success: false, error: 'fail' }) };
+    h.observe('t', args, err);
+    h.observe('t', args, err);
+    h.observe('t', args, err);
+    assert(h.hasPendingSuggestion());
+    const s = h.consumeSuggestion();
+    assert(s && s.type === 'gotcha');
+    assert(!h.hasPendingSuggestion());
+  });
+
+  test('SelfHealer disabled is noop', () => {
+    const { SelfHealer } = require('../lib/self-healer');
+    const h = new SelfHealer({ enabled: false });
+    const r = h.observe('x', {}, { content: JSON.stringify({ success: false, error: 'e' }) });
+    assert(r === null);
+    assert(h.getStats().observed === 0);
+  });
+
+  test('AgentLoop wires selfHealer + wire memoryStore into it', () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({ projectDir: path.resolve(__dirname, '..') });
+    assert(agent.selfHealer);
+    assert(agent.executor.selfHealer === agent.selfHealer);
+    assert(agent.selfHealer.memoryStore === agent.memoryStore);
+  });
+
+  test('SelfHealer errorKey normalizes numbers + paths', () => {
+    const { SelfHealer } = require('../lib/self-healer');
+    const h = new SelfHealer();
+    const k1 = h._errorKey('ENOENT: /home/user/file123.js not found');
+    const k2 = h._errorKey('ENOENT: /other/path/file456.js not found');
+    assert(k1 === k2, `errors should normalize: "${k1}" vs "${k2}"`);
+  });
+
   await new Promise(r => setTimeout(r, 500)); // let async tests settle
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===`);

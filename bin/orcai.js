@@ -60,6 +60,7 @@ const BUILTIN_CMDS = [
   'memory', 'team', 'guard', 'route', 'locks',
   'orchestrator', 'orch', 'delegate', 'bg',
   'replay', 'transcripts', 'redo', 'ratelimit', 'rl',
+  'heal', 'healer',
   'exit', 'quit', 'help'
 ];
 
@@ -874,6 +875,20 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
+    if (input === '/heal' || input === '/healer') {
+      const h = agent.selfHealer;
+      if (!h) { console.log(chalk.yellow('  Self-healer disabled.')); continue; }
+      const stats = h.getStats();
+      console.log(chalk.gray(`  Self-healer: ${stats.observed} observed | ${stats.gotchas_saved} gotchas | ${stats.recoveries_saved} recoveries | ${stats.active_streaks} active streaks | ${stats.pending_suggestions} pending`));
+      if (h.lastErrors.length > 0) {
+        console.log(chalk.gray(`  Recent errors:`));
+        for (const e of h.lastErrors.slice(-5)) {
+          console.log(chalk.gray(`    ${e.toolName}: ${e.errorText.slice(0, 80)}`));
+        }
+      }
+      continue;
+    }
+
     if (input === '/ratelimit' || input === '/rl') {
       const rl = getRateLimitState();
       if (rl.remaining == null && rl.lastError == null) {
@@ -1110,6 +1125,7 @@ async function interactiveMode(projectDir, opts) {
     /replay [id]      — Replay transcript (default: latest)
     /redo             — Re-run last user prompt
     /ratelimit, /rl   — API rate limit state
+    /heal, /healer    — Self-healer stats (auto-save gotcha + suggest workaround)
     /exit             — Thoat
     /help             — Hien help
 
