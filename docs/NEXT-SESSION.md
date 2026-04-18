@@ -1,23 +1,31 @@
-# Next Session — Handoff 2026-04-18 Round 3 → 2026-04-XX
+# Next Session — Handoff 2026-04-18 Round 4 → 2026-04-XX
 
 > Doc file nay TRUOC khi bat dau session moi voi project ai-orchestrator.
-> Session 2026-04-18 Round 3 da lam: xem docs/IMPROVEMENT-LOG.md (entry "Round 3")
+> Session 2026-04-18 Round 4 da lam: xem commits e453d66..9b4744e
 
 ---
 
-## Trang thai repo khi dong phien (2026-04-18 Round 3 end)
+## Trang thai repo khi dong phien (2026-04-18 Round 4 end)
 
 - **Branch**: main
-- **Latest commit**: `c6b3ea3 docs(bench): canonical leaderboard cross-session for model comparison`
-- **Commit count phien**: +6 (fix fuzz CRITs, fix bg_list, fix security CRIT/HIGH, test+docs, leaderboard, bench commit round 2)
-- **Remote**: synced sau khi push
-- **Tests**: `npm run test:all` = 533/533 pass, fuzz 88/90 pass (2 test bug non-tool)
+- **Latest commit**: `9b4744e chore(config): smart alias → Gemini 3 Flash`
+- **Commit count phien**: +4 (P1 perf cache, P4 trace tool, P2 B-tier bench, smart→gemini switch)
+- **Remote**: CHUA push (can user confirm)
+- **Tests**: `npm run test:all` = 561/561 pass (was 533 — them 16 parity + 10 bench-verify)
 - **CI**: GitHub Actions wired
 - **Leaderboard**: `benchmark/results/BENCHMARK-LEADERBOARD.md` — canonical cross-session, 10 model da test
+- **Config change**: alias `smart` tro toi Gemini 3 Flash (khong con Claude Sonnet). Alias `sonnet` van co cho explicit opt-in.
 
-## Uu tien phien sau (sau Round 3 Continuation)
+## Da hoan thanh trong Round 4 (phien nay)
 
-**Da xu ly xong**: P0 (4 MED + 2 LOW security), P1 retry (4 model van 429), P3 (2 test-bug).
+- ✓ **P1** token inefficiency: tool result cache + stricter evict + stuck-detector them redundant_read_after_search + trim 70%→50% + system prompt strengthen. Commit e453d66.
+- ✓ **P4** orcai-trace CLI: `node bin/orcai-trace.js --session <id>` → bang tool call + bytes + ~tokens + top offenders + actionable suggestions. Transcript logger them content_bytes/tokens_estimate/cached. Commit ea0192c.
+- ✓ **P2** B-tier benchmark: T06-T10 (extract, flag, schema, migrate, errors) voi self-contained fixtures + multi_file verify type (5 check kinds). 19/19 smoke test pass. Commit 4a88098.
+- ✓ **Model switch** (user 2026-04-18): smart → gemini-3-flash. Sonnet chi explicit opt-in. Commit 9b4744e.
+
+## Uu tien phien sau
+
+**Chua xu ly**: P3 retry 4 model (can credit confirmation).
 
 ### Priority 1 — Token inefficiency (uu tien cao nhat phien sau)
 Agent dung 68K input token cho task don gian "dem async function". Claude Code chi can 1-2 tool call.
