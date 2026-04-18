@@ -48,11 +48,50 @@
 - 88/90 fuzz pass (2 fail la test bug khong phai tool bug)
 - 9/9 bench-verify pass (fix stale T01 stdout format)
 
-### Con lai cho phien sau
+### Con lai cho phien sau (truoc continuation)
 - Retry 4 model 429 (qwen-coder, qwen-next, hermes, llama70b)
 - Fix 4 MEDIUM + 2 LOW security finding tu audit
 - Fix 2 test-bug signature (embed_stats, embed_clear)
 - Token inefficiency (Priority #1 handoff cu — van chua dung)
+
+---
+
+## Phien 2026-04-18 Round 3 Continuation — P0/P1/P3 cleanup
+
+Sau Round 3 chinh, tiep tuc xu ly P0 (MED + LOW security) + P1 (retry free models) + P3 (test bugs).
+
+### P1 — Retry 4 rate-limited free model
+- Ping lai lan 2: tat ca **van 429** upstream
+- Ket luan: 4 model nay **khong kha dung tren free tier OpenRouter** o thoi diem nay
+- Update LEADERBOARD them section "Option de unblock" (credit, provider khac, doi time, skip)
+
+### P0 — Fix 4 MEDIUM + 2 LOW security finding
+- **MED-1 shadow-git** (commit `6b7e2f0`): them `_execArgs()` execFileSync argv, migrate 3 callsite co input dong (rollback checkout, diff name-status + hunks)
+- **MED-2 glob-tool** (commit `6b7e2f0`): **false positive** — line 33 da co boundary check, audit Agent C doc sai line 29
+- **MED-3 ast-parse** (commit `6b7e2f0`): them `_resolveInProject(filePath, projectDir)` helper, apply cho 4 function (astParse/astFindSymbol/astFindUsages/astRenameSymbol). Update executor truyen `this.projectDir` vao
+- **MED-4 session-continuity** (commit `6b7e2f0`): named handler + `detach()` method → caller co the off() khi session end, tranh listener accumulation
+- **LOW-1 init-project** (commit `6b7e2f0`): execSync string → execFileSync argv cho consistency
+- **LOW-2 orcai-loop-start** (commit `6b7e2f0`): them comment giai thich shell:true la co y (Windows .cmd spawn, args hardcoded, khong co user input)
+
+### P3 — Fix 2 test-bug signature
+- fuzz embed_stats/embed_clear goi sai signature: truyen store trong args thay vi ctx. Fix ve form (args, ctx) + them confirm:true cho embedClear.
+- Ket qua: **90/90 fuzz pass** (tu 88/90)
+
+### Commit
+- `6b7e2f0` fix(security): MED-1/3/4 + LOW-1/2 + test-bug signatures (7 files, +87/-35)
+- `a9002e2` docs(bench): LEADERBOARD note 4 model still 429
+
+### Test state cuoi Round 3 Continuation
+- 533 test:all pass
+- **90/90 fuzz pass** (het 2 test-bug)
+- 9/9 bench-verify pass
+- Push origin/main thanh cong
+
+### Con lai cho phien sau
+- **P2: Token inefficiency** (agent dung 68K token cho task "dem async function" — can fix context-guard, stuck-detector, agent-loop cache + system prompt)
+- **P4: B-tier benchmark** (5 multi-file refactor task) — yeu cau harness support multi-file fixture
+- 4 model 429 — retry khi co credit/provider moi
+- Token tracing tool: log tung tool call de debug 68K inflation
 
 ---
 

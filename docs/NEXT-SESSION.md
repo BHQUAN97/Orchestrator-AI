@@ -15,31 +15,48 @@
 - **CI**: GitHub Actions wired
 - **Leaderboard**: `benchmark/results/BENCHMARK-LEADERBOARD.md` — canonical cross-session, 10 model da test
 
-## Uu tien phien sau (theo severity)
+## Uu tien phien sau (sau Round 3 Continuation)
 
-### Priority 0 — Fix 4 MEDIUM + 2 LOW security finding (tu audit 2026-04-18)
-- **MED-1** `tools/shadow-git.js:382,439,441` — file path interpolation shell. Fix: `_exec` → execFileSync argv
-- **MED-2** `tools/glob-tool.js:29` — cwd khong check project boundary. Fix: `startsWith(projectDir + sep)`
-- **MED-3** `tools/ast-parse.js:139,267,421` — absPath khong validate. Fix: them boundary check
-- **MED-4** `lib/session-continuity.js:254-258` — listener accumulation. Fix: `removeListener` in stop/teardown
-- **LOW-1/2** init-project + orcai-loop-start execSync consistency — migrate to execFileSync
+**Da xu ly xong**: P0 (4 MED + 2 LOW security), P1 retry (4 model van 429), P3 (2 test-bug).
 
-### Priority 1 — Retry 4 model 429 tu Round 2
-- `free-qwen-coder`, `free-qwen-next`, `free-hermes`, `free-llama70b` — upstream rate-limit phien truoc
-- Chay `node benchmark/runner.js --tier A --model free-qwen-coder,free-qwen-next,free-hermes,free-llama70b`
-- Neu pass > 60%: append vao BENCHMARK-LEADERBOARD.md
+### Priority 1 — Token inefficiency (uu tien cao nhat phien sau)
+Agent dung 68K input token cho task don gian "dem async function". Claude Code chi can 1-2 tool call.
 
-### Priority 2 — Token inefficiency (handoff cu chua dung)
-- Agent dung 68K input token cho task don gian. Claude Code chi can 1-2 tool call.
-- Root cause can dieu tra: `lib/context-guard.js` evict, `lib/stuck-detector.js` repeated read, `lib/agent-loop.js` cache
-- Fix: cache tool result + stricter evict + system prompt nhan manh grep truoc doc
+**Root cause can dieu tra**:
+- `lib/context-guard.js` — check evict logic, co remove tool result cu khi task chuyen phase khong?
+- `lib/stuck-detector.js` — co detect repeated read cung file khong?
+- `lib/agent-loop.js` — co cache tool result trong 1 session khong? Grep da tra 0 nhung agent van doc file.
+- System prompt trong `--direct` mode — co nhan manh "Uu tien grep/wc truoc, khong read_file full" khong?
 
-### Priority 3 — Fix 2 test bug (non-tool)
-- `test/fuzz-tools.test.js`: `embed_stats`/`embed_clear` sai signature — fix: `embedStats({}, { embeddingStore: store })`
+**Steps**:
+```bash
+# Reproduce
+node bin/orcai.js --direct --model fast -p /tmp/test-fixture "count async functions in lib/agent-loop.js"
+# Trace
+ORCAI_TRACE=1 node bin/orcai.js ...
+```
 
-### Priority 4 — B-tier benchmark expand
-- 5 B-tier multi-file refactor task (extract helper, add flag, migrate deprecated, standardize error, update schema)
-- Can harness support multi-file fixture truoc khi viet task
+**Deliverable**: commit `perf(agent-loop): cache tool result + stricter evict` + test regression chung minh reduce token > 80% cho T01.
+
+**Uoc luong**: 2-4 gio
+
+### Priority 2 — B-tier benchmark expand (5 multi-file refactor task)
+- extract helper, add flag, migrate deprecated, standardize error, update schema
+- Can harness support multi-file fixture — viet `benchmark/fixtures/b-tier/` skeleton truoc
+- Moi task: `tasks.json` entry + `verify.js` logic + fixture snapshot
+
+### Priority 3 — Retry 4 model 429 khi co credit
+- Option 1: Nap $5-10 OpenRouter → rate-limit nhe
+- Option 2: Chutes.ai free tier (provider upstream khac) → them ID paid variant
+- Neu pass > 60%: append vao BENCHMARK-LEADERBOARD.md Section II
+
+### Priority 4 — Token tracing tool (ho tro Priority 1)
+- Viet `node bin/orcai-trace.js --session <id>` doc `.orcai/traces/` → bang tool call + token/call
+- Dung de debug inflation 68K nhanh hon
+
+### Priority 5 — C-tier benchmark (debug/investigation tasks)
+- find leak, trace flow, find duplicate, find dead code, security audit
+- Can agent co plan mode + memory de theo doi tien do
 
 ---
 
