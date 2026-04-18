@@ -96,7 +96,7 @@ echo.
 
 echo [4] Smart Router...
 cd /d E:\DEVELOP\ai-orchestrator
-node -e "const{SmartRouter:S}=require('./router/smart-router');const r=new S({availableModels:['gemini-flash','kimi-k2.5','deepseek','sonnet']});[['Fix button','build',['c.tsx']],['Add API','build',['s.service.ts']],['Review','review',['a.ts']],['Design','spec',[]]].forEach(([p,t,f])=>{const m=r.route({task:t,files:f,prompt:p});console.log('  '+p.padEnd(15)+' -> '+m.model+' ('+m.litellm_name+')')})"
+node -e "const{SmartRouter:S}=require('./router/smart-router');const r=new S({availableModels:['gemini-flash','kimi-k2.5','deepseek','opus']});[['Fix button','build',['c.tsx']],['Add API','build',['s.service.ts']],['Review','review',['a.ts']],['Design','spec',[]]].forEach(([p,t,f])=>{const m=r.route({task:t,files:f,prompt:p});console.log('  '+p.padEnd(15)+' -> '+m.model+' ('+m.litellm_name+')')})"
 echo.
 pause
 goto menu

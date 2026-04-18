@@ -74,13 +74,14 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 10
 
-  # sonnet: explicit opt-in only (user yeu cau khong dung Sonnet lam default 2026-04-18)
-  - model_name: "sonnet"
-    litellm_params:
-      model: "openai/anthropic/claude-sonnet-4-6"
-      api_base: "https://openrouter.ai/api/v1"
-      api_key: "os.environ/OPENROUTER_API_KEY"
-      rpm: 20
+  # sonnet: REMOVED 2026-04-18 sau bench toan dien
+  # Ly do: Sonnet 4.6 ($3/$15 per 1M) pass 60% A-tier vs cheap 100% @ $0.15/$0.60.
+  # Moi use case Sonnet tu truoc den nay co the thay bang:
+  #   - review/reasoning/debugger → cheap (100% R-tier pass)
+  #   - ctx > 400K           → qwen3-plus (1M ctx, $0.26/1M)
+  #   - design/SA kho        → architect (Opus)
+  # Neu MOT ngay can Sonnet lai: them lai entry voi ly do cu the trong commit message.
+  # Xem docs/MODEL-COMPARISON.md cho du lieu bench.
 
   - model_name: "gpt-mini"
     litellm_params:
