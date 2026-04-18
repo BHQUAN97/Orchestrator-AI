@@ -18,6 +18,9 @@ const path = require('path');
  * @param {FileManager} fileManager
  */
 async function batchEdit(args, fileManager) {
+  if (!args || typeof args !== 'object') {
+    return { success: false, error: 'args phải là object chứa array edits' };
+  }
   const { edits } = args;
 
   if (!Array.isArray(edits) || edits.length === 0) {

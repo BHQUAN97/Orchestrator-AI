@@ -82,6 +82,9 @@ class FileManager {
    * - Luôn chặn file .env, .key, .pem dù ở đâu
    */
   _validateReadPath(filePath) {
+    if (!filePath || typeof filePath !== 'string') {
+      throw new Error('BLOCKED: path phải là string non-empty');
+    }
     const resolved = this._resolvePath(filePath);
     const projectNorm = path.normalize(this.projectDir);
 
@@ -108,6 +111,9 @@ class FileManager {
   }
 
   _validateWritePath(filePath) {
+    if (!filePath || typeof filePath !== 'string') {
+      throw new Error('BLOCKED: path phải là string non-empty');
+    }
     const resolved = this._resolvePath(filePath);
     const projectNorm = path.normalize(this.projectDir);
 
@@ -176,6 +182,9 @@ class FileManager {
   // =============================================
 
   async writeFile({ path: filePath, content }) {
+    if (typeof content !== 'string') {
+      return { success: false, error: 'content phải là string' };
+    }
     let resolved;
     try {
       resolved = this._validateWritePath(filePath);
@@ -209,6 +218,12 @@ class FileManager {
   // =============================================
 
   async editFile({ path: filePath, old_string, new_string, replace_all = false }) {
+    if (typeof old_string !== 'string') {
+      return { success: false, error: 'old_string phải là string' };
+    }
+    if (typeof new_string !== 'string') {
+      return { success: false, error: 'new_string phải là string' };
+    }
     let resolved;
     try {
       resolved = this._validateWritePath(filePath);
@@ -312,6 +327,13 @@ class FileManager {
   // =============================================
 
   async searchFiles({ pattern, path: searchPath = '.', include, max_results = 20 }) {
+    if (typeof pattern !== 'string' || !pattern) {
+      return { success: false, error: 'pattern phải là string non-empty' };
+    }
+    // ReDoS heuristic — chặn nested quantifier (vd: (a+)+, (a*)*)
+    if (/\([^)]*[+*][^)]*\)\s*[+*]/.test(pattern)) {
+      return { success: false, error: 'Pattern có nested quantifier có thể gây catastrophic backtracking. Dùng regex đơn giản hơn.' };
+    }
     let resolved;
     try {
       resolved = this._validateReadPath(searchPath);
@@ -343,7 +365,12 @@ class FileManager {
       return { success: false, error: `Path not found or inaccessible: ${searchPath}` };
     }
 
-    const regex = new RegExp(pattern, 'gi');
+    let regex;
+    try {
+      regex = new RegExp(pattern, 'gi');
+    } catch (e) {
+      return { success: false, error: `Invalid regex: ${e.message}` };
+    }
 
     for (const file of files) {
       if (results.length >= max_results) break;

@@ -20,15 +20,15 @@ function assert(ok, msg) {
 // T01 — stdout_match with numeric range
 const t01 = TASKS.find(t => t.id === 'T01');
 assert(
-  runVerify(t01, { stdout: 'There are 12 async functions', workDir: '' }).pass === true,
-  'T01 pass when "12 async" in stdout'
+  runVerify(t01, { stdout: 'ASYNC_COUNT=12', workDir: '' }).pass === true,
+  'T01 pass when "ASYNC_COUNT=12" in stdout'
 );
 assert(
   runVerify(t01, { stdout: 'nothing here', workDir: '' }).pass === false,
   'T01 fail when no match'
 );
 assert(
-  runVerify(t01, { stdout: 'count: 200 async things', workDir: '' }).pass === false,
+  runVerify(t01, { stdout: 'ASYNC_COUNT=200', workDir: '' }).pass === false,
   'T01 fail when number out of range'
 );
 
