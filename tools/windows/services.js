@@ -21,7 +21,9 @@ function parseJson(stdout) {
 }
 
 async function servicesList({ filter } = {}) {
-  const where = filter ? `| Where-Object { $_.Name -like '*${q(filter)}*' -or $_.DisplayName -like '*${q(filter)}*' }` : '';
+  // Filter chỉ cho phép alphanum + vài ký tự an toàn cho service name — tránh PS script block escape qua `}`
+  const safeFilter = filter ? String(filter).replace(/[^A-Za-z0-9\-_.]/g, '') : '';
+  const where = safeFilter ? `| Where-Object { $_.Name -like '*${safeFilter}*' -or $_.DisplayName -like '*${safeFilter}*' }` : '';
   const script = `Get-Service ${where} | Select-Object Name,DisplayName,Status,StartType | ConvertTo-Json -Depth 3 -Compress`;
   const r = await runPowerShell({ script });
   if (!r.success) return { ok: false, error: r.error || 'powershell failed', stderr: r.stderr };

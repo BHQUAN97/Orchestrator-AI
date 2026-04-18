@@ -306,4 +306,16 @@ class TerminalRunner {
   }
 }
 
-module.exports = { TerminalRunner, BLOCKED_COMMANDS, CONFIRM_COMMANDS };
+// Standalone blocklist check — dùng cho tool khác (wsl_exec, background-bash) để
+// apply cùng blocklist mà không cần instantiate TerminalRunner
+function checkBlocked(command) {
+  if (typeof command !== 'string') return { blocked: true, reason: 'command không phải string' };
+  for (const pattern of BLOCKED_COMMANDS) {
+    if (pattern.test(command)) {
+      return { blocked: true, reason: `Lệnh bị cấm: ${command.slice(0, 80)}` };
+    }
+  }
+  return { blocked: false };
+}
+
+module.exports = { TerminalRunner, BLOCKED_COMMANDS, CONFIRM_COMMANDS, checkBlocked };

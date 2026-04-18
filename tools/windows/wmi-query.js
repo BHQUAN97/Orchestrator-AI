@@ -7,6 +7,9 @@ function psString(s) {
   return String(s).replace(/'/g, "''");
 }
 
+// WMI class/property name chỉ cho phép alphanum + underscore (tránh PS injection)
+const SAFE_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Query WMI/CIM.
  * @param {Object} opts
@@ -19,9 +22,22 @@ async function wmiQuery({ class_name, properties, where } = {}) {
     return { success: false, error: 'class_name is required', results: [] };
   }
 
+  // Class name phải là identifier hợp lệ (Win32_Process, Win32_Service, ...)
+  if (!SAFE_IDENT_RE.test(class_name)) {
+    return { success: false, error: `class_name không hợp lệ: ${class_name} (chỉ alphanum + underscore)`, results: [] };
+  }
+
+  // Properties phải là identifier hợp lệ — tránh PS injection qua field name
+  if (Array.isArray(properties) && properties.length) {
+    const bad = properties.find(p => typeof p !== 'string' || !SAFE_IDENT_RE.test(p));
+    if (bad) {
+      return { success: false, error: `property không hợp lệ: ${bad} (chỉ alphanum + underscore)`, results: [] };
+    }
+  }
+
   const cls = psString(class_name);
   const selectFields = Array.isArray(properties) && properties.length
-    ? properties.map(psString).join(',')
+    ? properties.join(',')
     : '*';
 
   let cmd;

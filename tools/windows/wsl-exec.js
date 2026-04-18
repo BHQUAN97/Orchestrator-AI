@@ -3,6 +3,7 @@
 // Passthrough tham chieu WSL — chay command Linux tu Windows
 const { spawn } = require('child_process');
 const treeKill = require('tree-kill');
+const { checkBlocked } = require('../terminal-runner');
 
 const MAX_OUTPUT = 100 * 1024;
 let _distros = null; // cache danh sach distro
@@ -51,6 +52,13 @@ async function listDistros() {
 async function wslExec({ command, distro, cwd, timeout = 30000 } = {}) {
   if (!command || typeof command !== 'string') {
     return { success: false, stdout: '', stderr: '', exitCode: -1, error: 'command is required' };
+  }
+
+  // Apply cùng blocklist như TerminalRunner — wsl_exec vẫn chạy qua `sh -c` nên cần chặn
+  // các lệnh phá hoại (rm -rf /, curl | bash, fork bomb, v.v.) dù là trong WSL
+  const block = checkBlocked(command);
+  if (block.blocked) {
+    return { success: false, stdout: '', stderr: '', exitCode: -1, error: `BLOCKED: ${block.reason}` };
   }
 
   // Lay danh sach distro de verify
