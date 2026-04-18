@@ -95,6 +95,43 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
+  # === LOCAL MODELS (LM Studio @ localhost:1234) ===
+  # Hybrid strategy: local SUPPLEMENTS cloud, khong replace.
+  # Khi chay ngoai Docker: override api_base bang env LMSTUDIO_URL (vd http://localhost:1234/v1)
+  # Trong Docker: dung host.docker.internal de reach LM Studio chay tren host
+
+  # local-classifier: 1.5B — phan loai intent nhanh, tiet kiem cloud calls
+  - model_name: "local-classifier"
+    litellm_params:
+      model: "openai/qwen2.5-coder-1.5b-instruct"
+      api_base: "os.environ/LMSTUDIO_URL"  # fallback: http://host.docker.internal:1234/v1
+      api_key: "lm-studio"
+      rpm: 120
+
+  # local-workhorse: 3B — task trivial, docs, rename
+  - model_name: "local-workhorse"
+    litellm_params:
+      model: "openai/qwen2.5-coder-3b-instruct"
+      api_base: "os.environ/LMSTUDIO_URL"
+      api_key: "lm-studio"
+      rpm: 60
+
+  # local-heavy: 7B — privacy-sensitive code, offline fallback
+  - model_name: "local-heavy"
+    litellm_params:
+      model: "openai/qwen2.5-coder-7b-instruct"
+      api_base: "os.environ/LMSTUDIO_URL"
+      api_key: "lm-studio"
+      rpm: 30
+
+  # local-embed: nomic embeddings — free local alternative cho OpenAI text-embedding-3-small
+  - model_name: "local-embed"
+    litellm_params:
+      model: "openai/text-embedding-nomic-embed-text-v1.5@q4_k_m"
+      api_base: "os.environ/LMSTUDIO_URL"
+      api_key: "lm-studio"
+      rpm: 120
+
 # Router
 router_settings:
   routing_strategy: "usage-based-routing-v2"

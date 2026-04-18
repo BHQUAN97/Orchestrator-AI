@@ -28,6 +28,8 @@ services:
       - UI_USERNAME=admin
       - UI_PASSWORD=admin
       - STORE_MODEL_IN_DB=False
+      # host.docker.internal routes container → host LM Studio (port 1234)
+      - LMSTUDIO_URL=${LMSTUDIO_URL:-http://host.docker.internal:1234/v1}
     command: >
       --config /app/config.yaml
       --port 4000
