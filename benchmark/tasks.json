@@ -73,5 +73,106 @@
       "type": "stdout_match",
       "pattern": "read_file[\\s\\S]*write_file[\\s\\S]*execute_command"
     }
+  },
+  {
+    "id": "T06",
+    "tier": "B",
+    "title": "Extract duplicate helper to shared util",
+    "prompt": "Files math.js and stats.js both define the same function `sum(arr)`. Extract it to a new file utils.js, then update math.js and stats.js to require it from ./utils instead of redefining. Do not change public exports of math.js or stats.js.",
+    "fixture": "b-tier",
+    "max_iterations": 15,
+    "timeout_s": 180,
+    "budget_usd": 0.30,
+    "verify": {
+      "type": "multi_file",
+      "checks": [
+        { "kind": "file_exists", "path": "utils.js", "min_length": 30 },
+        { "kind": "regex", "path": "utils.js", "pattern": "function\\s+sum\\s*\\(" },
+        { "kind": "regex", "path": "utils.js", "pattern": "module\\.exports" },
+        { "kind": "pattern_count", "path": "math.js", "pattern": "function\\s+sum\\s*\\(", "op": "eq", "value": 0 },
+        { "kind": "pattern_count", "path": "stats.js", "pattern": "function\\s+sum\\s*\\(", "op": "eq", "value": 0 },
+        { "kind": "regex", "path": "math.js", "pattern": "require\\(['\"]\\./utils['\"]\\)" },
+        { "kind": "regex", "path": "stats.js", "pattern": "require\\(['\"]\\./utils['\"]\\)" }
+      ]
+    }
+  },
+  {
+    "id": "T07",
+    "tier": "B",
+    "title": "Add --dry flag to CLI",
+    "prompt": "Modify cli.js to support a --dry flag. When the user passes --dry, the CLI should print exactly `DRY RUN` and exit without printing the normal greeting. The existing --help and default behavior must still work.",
+    "fixture": "b-tier",
+    "max_iterations": 10,
+    "timeout_s": 120,
+    "budget_usd": 0.20,
+    "verify": {
+      "type": "multi_file",
+      "checks": [
+        { "kind": "regex", "path": "cli.js", "pattern": "--dry" },
+        { "kind": "regex", "path": "cli.js", "pattern": "DRY RUN" },
+        { "kind": "regex", "path": "cli.js", "pattern": "Hello" }
+      ]
+    }
+  },
+  {
+    "id": "T08",
+    "tier": "B",
+    "title": "Add optional description field to memory_save schema",
+    "prompt": "In schema.json, add an optional field `description` of type string (not required) to the `memory_save` tool's parameters.properties. Do not change the required array. Do not modify memory_recall.",
+    "fixture": "b-tier",
+    "max_iterations": 10,
+    "timeout_s": 120,
+    "budget_usd": 0.20,
+    "verify": {
+      "type": "multi_file",
+      "checks": [
+        { "kind": "json_path", "path": "schema.json", "pointer": "tools.0.parameters.properties.description.type", "value": "string" },
+        { "kind": "json_path", "path": "schema.json", "pointer": "tools.0.name", "value": "memory_save" },
+        { "kind": "not_regex", "path": "schema.json", "pattern": "\"required\"\\s*:\\s*\\[[^\\]]*description" }
+      ]
+    }
+  },
+  {
+    "id": "T09",
+    "tier": "B",
+    "title": "Migrate deprecated fs.existsSync to fs.promises",
+    "prompt": "Files a.js, b.js, c.js all use the blocking fs.existsSync. Replace every occurrence with the async pattern using fs.promises.access. Make the caller functions async. Use try/catch on fs.promises.access — success means file exists, throw means it does not. Keep module.exports unchanged (async functions are fine).",
+    "fixture": "b-tier",
+    "max_iterations": 15,
+    "timeout_s": 180,
+    "budget_usd": 0.30,
+    "verify": {
+      "type": "multi_file",
+      "checks": [
+        { "kind": "pattern_count", "path": "a.js", "pattern": "fs\\.existsSync", "op": "eq", "value": 0 },
+        { "kind": "pattern_count", "path": "b.js", "pattern": "fs\\.existsSync", "op": "eq", "value": 0 },
+        { "kind": "pattern_count", "path": "c.js", "pattern": "fs\\.existsSync", "op": "eq", "value": 0 },
+        { "kind": "regex", "path": "a.js", "pattern": "fs\\.promises\\.access|fsp\\.access" },
+        { "kind": "regex", "path": "b.js", "pattern": "fs\\.promises\\.access|fsp\\.access" },
+        { "kind": "regex", "path": "c.js", "pattern": "fs\\.promises\\.access|fsp\\.access" }
+      ]
+    }
+  },
+  {
+    "id": "T10",
+    "tier": "B",
+    "title": "Standardize error handling via ToolError class",
+    "prompt": "Create a new file errors.js exporting a class ToolError that extends Error and has a `code` property. Then update mod1.js and mod2.js to use this ToolError class: replace every `throw new Error(...)` and every `return { success: false, error: ... }` pattern with `throw new ToolError(message, code)`. Keep the module.exports shape of mod1.js and mod2.js.",
+    "fixture": "b-tier",
+    "max_iterations": 15,
+    "timeout_s": 180,
+    "budget_usd": 0.30,
+    "verify": {
+      "type": "multi_file",
+      "checks": [
+        { "kind": "file_exists", "path": "errors.js", "min_length": 50 },
+        { "kind": "regex", "path": "errors.js", "pattern": "class\\s+ToolError\\s+extends\\s+Error" },
+        { "kind": "regex", "path": "errors.js", "pattern": "module\\.exports" },
+        { "kind": "regex", "path": "mod1.js", "pattern": "ToolError" },
+        { "kind": "regex", "path": "mod2.js", "pattern": "ToolError" },
+        { "kind": "pattern_count", "path": "mod1.js", "pattern": "throw\\s+new\\s+Error\\s*\\(", "op": "eq", "value": 0 },
+        { "kind": "pattern_count", "path": "mod2.js", "pattern": "success:\\s*false", "op": "eq", "value": 0 }
+      ]
+    }
   }
 ]

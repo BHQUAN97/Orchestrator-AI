@@ -68,7 +68,27 @@ function setupFixture(task) {
     }
     return dir;
   }
+  if (task.fixture === 'b-tier') {
+    // Copy toan bo thu muc fixtures/b-tier/<taskId>/ vao tmp dir
+    const srcDir = path.join(__dirname, 'fixtures', 'b-tier', task.id);
+    if (!fs.existsSync(srcDir)) {
+      throw new Error(`B-tier fixture missing: ${srcDir}`);
+    }
+    const dstDir = path.join(os.tmpdir(), `orcai-bench-${task.id}-${Date.now()}`);
+    _copyRecursive(srcDir, dstDir);
+    return dstDir;
+  }
   throw new Error(`Unknown fixture: ${task.fixture}`);
+}
+
+function _copyRecursive(src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dst, entry.name);
+    if (entry.isDirectory()) _copyRecursive(s, d);
+    else fs.copyFileSync(s, d);
+  }
 }
 
 function cleanupFixture(dir) {

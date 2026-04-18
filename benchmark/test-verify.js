@@ -88,7 +88,80 @@ assert(
   'T05 pass when read_file + write_file + execute_command all present'
 );
 
+// === B-tier smoke tests — simulate ket qua dung va sai cho tung task ===
+
+// T06 — extract helper
+const t06 = TASKS.find(t => t.id === 'T06');
+const d06 = path.join(os.tmpdir(), 'bench-verify-t06-' + Date.now());
+fs.mkdirSync(d06, { recursive: true });
+// Correct: utils.js + math/stats require it
+fs.writeFileSync(path.join(d06, 'utils.js'), `function sum(a){let s=0;for(const x of a)s+=x;return s}\nmodule.exports={sum};`);
+fs.writeFileSync(path.join(d06, 'math.js'), `const {sum}=require('./utils');\nfunction mean(a){return sum(a)/a.length}\nmodule.exports={mean};`);
+fs.writeFileSync(path.join(d06, 'stats.js'), `const {sum}=require('./utils');\nmodule.exports={sum};`);
+assert(runVerify(t06, { workDir: d06 }).pass === true, 'T06 pass when helper extracted and required');
+// Wrong: math still has its own sum
+fs.writeFileSync(path.join(d06, 'math.js'), `function sum(a){let s=0;for(const x of a)s+=x;return s}\nmodule.exports={sum};`);
+assert(runVerify(t06, { workDir: d06 }).pass === false, 'T06 fail when math.js still defines sum');
+
+// T07 — add --dry flag
+const t07 = TASKS.find(t => t.id === 'T07');
+const d07 = path.join(os.tmpdir(), 'bench-verify-t07-' + Date.now());
+fs.mkdirSync(d07, { recursive: true });
+fs.writeFileSync(path.join(d07, 'cli.js'), `
+const args = process.argv.slice(2);
+if (args.includes('--dry')) { console.log('DRY RUN'); process.exit(0); }
+console.log('Hello');
+`);
+assert(runVerify(t07, { workDir: d07 }).pass === true, 'T07 pass when --dry + DRY RUN + Hello all present');
+fs.writeFileSync(path.join(d07, 'cli.js'), `console.log('Hello');`);
+assert(runVerify(t07, { workDir: d07 }).pass === false, 'T07 fail when --dry not added');
+
+// T08 — update schema JSON
+const t08 = TASKS.find(t => t.id === 'T08');
+const d08 = path.join(os.tmpdir(), 'bench-verify-t08-' + Date.now());
+fs.mkdirSync(d08, { recursive: true });
+const schemaOK = {
+  tools: [
+    { name: 'memory_save', parameters: { type: 'object', properties: {
+      type: { type: 'string' }, content: { type: 'string' },
+      description: { type: 'string' }
+    }, required: ['type', 'content'] } }
+  ]
+};
+fs.writeFileSync(path.join(d08, 'schema.json'), JSON.stringify(schemaOK, null, 2));
+assert(runVerify(t08, { workDir: d08 }).pass === true, 'T08 pass when description added as optional string');
+// Wrong: description added but also pushed into required
+const schemaWrong = JSON.parse(JSON.stringify(schemaOK));
+schemaWrong.tools[0].parameters.required.push('description');
+fs.writeFileSync(path.join(d08, 'schema.json'), JSON.stringify(schemaWrong, null, 2));
+assert(runVerify(t08, { workDir: d08 }).pass === false, 'T08 fail when description listed as required');
+
+// T09 — migrate deprecated
+const t09 = TASKS.find(t => t.id === 'T09');
+const d09 = path.join(os.tmpdir(), 'bench-verify-t09-' + Date.now());
+fs.mkdirSync(d09, { recursive: true });
+for (const f of ['a.js', 'b.js', 'c.js']) {
+  fs.writeFileSync(path.join(d09, f), `const fsp=require('fs').promises;\nasync function go(p){await fsp.access(p);}`);
+}
+assert(runVerify(t09, { workDir: d09 }).pass === true, 'T09 pass when all 3 files migrated to fs.promises.access');
+fs.writeFileSync(path.join(d09, 'a.js'), `const fs=require('fs');\nfs.existsSync('x');`);
+assert(runVerify(t09, { workDir: d09 }).pass === false, 'T09 fail when a.js still uses fs.existsSync');
+
+// T10 — standardize error
+const t10 = TASKS.find(t => t.id === 'T10');
+const d10 = path.join(os.tmpdir(), 'bench-verify-t10-' + Date.now());
+fs.mkdirSync(d10, { recursive: true });
+fs.writeFileSync(path.join(d10, 'errors.js'), `class ToolError extends Error { constructor(m,c){super(m);this.code=c;} }\nmodule.exports={ToolError};`);
+fs.writeFileSync(path.join(d10, 'mod1.js'), `const {ToolError}=require('./errors');\nfunction p(){throw new ToolError('x','EMPTY');}`);
+fs.writeFileSync(path.join(d10, 'mod2.js'), `const {ToolError}=require('./errors');\nfunction l(){throw new ToolError('x','BAD');}`);
+assert(runVerify(t10, { workDir: d10 }).pass === true, 'T10 pass when ToolError used across files');
+fs.writeFileSync(path.join(d10, 'mod1.js'), `function p(){throw new Error('x');}`);
+assert(runVerify(t10, { workDir: d10 }).pass === false, 'T10 fail when mod1.js still uses throw new Error');
+
 fs.rmSync(tmpDir, { recursive: true, force: true });
+for (const d of [d06, d07, d08, d09, d10]) {
+  try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);
