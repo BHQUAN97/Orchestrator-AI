@@ -174,5 +174,50 @@
         { "kind": "pattern_count", "path": "mod2.js", "pattern": "success:\\s*false", "op": "eq", "value": 0 }
       ]
     }
+  },
+  {
+    "id": "R01",
+    "tier": "R",
+    "title": "Trace auth login flow in WebTemplate",
+    "prompt": "Analyze the backend authentication flow in this NestJS codebase. Trace what happens from the incoming POST /api/auth/login request to the JWT token being issued. In your final message, output AT LEAST 3 lines in this EXACT format (no other text or markdown between them):\nTRACE_FILE: <relative-path-to-controller>\nTRACE_FILE: <relative-path-to-service>\nTRACE_FILE: <relative-path-to-jwt-strategy-or-provider>\nThen one line: PASSWORD_CHECK: <relative-path>:<line-or-method-name>\nYou may read files to confirm. Do NOT modify any file.",
+    "fixture": "external-readonly",
+    "external_path": "E:/DEVELOP/WebTemplate",
+    "max_iterations": 20,
+    "timeout_s": 240,
+    "budget_usd": 0.50,
+    "verify": {
+      "type": "stdout_match",
+      "pattern": "TRACE_FILE:[\\s\\S]*auth\\.controller[\\s\\S]*TRACE_FILE:[\\s\\S]*auth\\.service[\\s\\S]*PASSWORD_CHECK:"
+    }
+  },
+  {
+    "id": "R02",
+    "tier": "R",
+    "title": "Find unbounded in-memory state (leak candidate)",
+    "prompt": "Scan this NestJS backend (backend/src) for singleton-scoped services (Injectable default scope) that hold UNBOUNDED in-memory state — arrays, maps, or caches that grow without explicit eviction/TTL. This is a potential memory leak. In your final message, output EXACTLY one line:\nLEAK_CANDIDATE: <relative-path>:<field-or-property-name>\nIf you find multiple, list only the most clear-cut one. If you find NONE, output:\nLEAK_CANDIDATE: none\nDo NOT modify any file.",
+    "fixture": "external-readonly",
+    "external_path": "E:/DEVELOP/WebTemplate",
+    "max_iterations": 20,
+    "timeout_s": 240,
+    "budget_usd": 0.50,
+    "verify": {
+      "type": "stdout_match",
+      "pattern": "LEAK_CANDIDATE:\\s*(?:[\\w\\-/.]+\\.(?:ts|js):\\w+|none)"
+    }
+  },
+  {
+    "id": "R03",
+    "tier": "R",
+    "title": "Audit: user-supplied URL fetched server-side (SSRF check)",
+    "prompt": "Audit this NestJS backend (backend/src) for POTENTIAL SSRF: places where a URL coming from user input (request body, query, or a stored record) is fetched server-side via http/https/fetch/axios/got without host allowlist or private-IP filter. In your final message, output EXACTLY one line in this format:\nSSRF_FINDING: <relative-path>:<line-hint>:<severity>\nSeverity is one of: HIGH, MEDIUM, LOW, NONE. If no risk found, use NONE and path \"none\". Example:\nSSRF_FINDING: modules/media/media.service.ts:fetchUrl:MEDIUM\nor\nSSRF_FINDING: none:0:NONE\nDo NOT modify any file.",
+    "fixture": "external-readonly",
+    "external_path": "E:/DEVELOP/WebTemplate",
+    "max_iterations": 20,
+    "timeout_s": 240,
+    "budget_usd": 0.50,
+    "verify": {
+      "type": "stdout_match",
+      "pattern": "SSRF_FINDING:\\s*(?:[\\w\\-/.]+\\.(?:ts|js):\\w+:(?:HIGH|MEDIUM|LOW)|none:0:NONE)"
+    }
   }
 ]

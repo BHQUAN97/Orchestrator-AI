@@ -78,6 +78,18 @@ function setupFixture(task) {
     _copyRecursive(srcDir, dstDir);
     return dstDir;
   }
+  if (task.fixture === 'external-readonly') {
+    // Tro thang den repo ngoai — read-only tasks (audit/trace/reasoning)
+    // Khong copy vi repo lon. Agent khong duoc sua (prompt enforce).
+    if (!task.external_path) {
+      throw new Error(`external-readonly fixture requires external_path`);
+    }
+    const p = path.resolve(task.external_path);
+    if (!fs.existsSync(p)) {
+      throw new Error(`External path missing: ${p}`);
+    }
+    return p;
+  }
   throw new Error(`Unknown fixture: ${task.fixture}`);
 }
 
@@ -91,7 +103,9 @@ function _copyRecursive(src, dst) {
   }
 }
 
-function cleanupFixture(dir) {
+function cleanupFixture(dir, task) {
+  // Khong xoa fixture external (la repo user, read-only)
+  if (task && task.fixture === 'external-readonly') return;
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 }
 
@@ -169,7 +183,7 @@ async function runOne(task, model) {
     log_file: path.basename(logFile)
   };
   console.log(`  -> ${verdict.pass ? 'PASS' : 'FAIL'} ${verdict.reason ? `(${verdict.reason})` : ''} [${wall_ms}ms]`);
-  cleanupFixture(workDir);
+  cleanupFixture(workDir, task);
   return record;
 }
 

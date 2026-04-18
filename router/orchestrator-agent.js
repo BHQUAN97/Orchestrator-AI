@@ -33,28 +33,28 @@ const { PipelineTracer } = require('../lib/pipeline-tracer');
 const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:5002';
 const LITELLM_KEY = process.env.LITELLM_KEY || 'sk-master-change-me';
 
-// === Agent Role → Model mapping (v2.2 — 2026-04-18 rebalance sau bench Qwen) ===
+// === Agent Role → Model mapping (v2.3 — 2026-04-18 rebalance sau R-tier reasoning bench) ===
 //
-// Bench A+B-tier (10 task) 2026-04-18:
-//   cheap (GPT-5.4 Mini):  100% pass, $0.010/task, 12s  ← WINNER moi role thuong
-//   qwen3-plus:             100% pass, $0.050/task, 20s, 1M ctx  ← long-context
-//   default (DeepSeek):     40%  pass, $0.070/task, 56s  ← BO
-//   smart (Sonnet cu):      60%  pass, $0.122/task      ← BO (user request)
+// Bench tong hop (16 task: 5A + 5B + 3R, 2 model can so):
+//   cheap (GPT-5.4 Mini):  100% pass A+B+R, $0.010-0.015/task, 12-13s, 400K ctx
+//   qwen3-plus:             100% pass A+B+R, $0.050-0.184/task, 20-41s, 1M ctx
+//                           ^ R-tier qwen3-plus ton 12x, MISS 1/3 reasoning (R02 leak)
 //
-// Chien luoc: cheap = workhorse 90%, qwen3-plus cho long-context/reasoning,
-// architect (Opus) chi khi SA/design kho.
+// Quyet dinh: cheap DOMINATES ca code gen + reasoning. qwen3-plus giu trong
+// config nhu explicit opt-in (khi that su can 1M ctx > 400K, hiem).
+// architect (Opus) chi khi SA/design cuc kho (~2% workload).
 const AGENT_ROLE_MAP = {
-  'architect':  'architect',   // Claude Opus 4.6 — SA, system design, task cuc kho (2% workload)
-  'tech-lead':  'qwen3-plus',  // Qwen3.5 Plus — review/reasoning 1M ctx, re hon Sonnet 60x
-  'planner':    'qwen3-plus',  // Qwen3.5 Plus — plan voi 1M ctx (tu default DeepSeek 40% pass)
-  'fe-dev':     'cheap',       // GPT-5.4 Mini — 100% pass, re nhat (tu default)
-  'be-dev':     'cheap',       // GPT-5.4 Mini — 100% pass, re nhat (tu default)
-  'reviewer':   'fast',        // Gemini 3 Flash — scan nhanh, re
-  'debugger':   'qwen3-plus',  // Qwen3.5 Plus — trace sau can ctx lon (tu Sonnet)
-  'scanner':    'cheap',       // GPT-5.4 Mini — quet project, doc file
-  'docs':       'cheap',       // GPT-5.4 Mini — text generation
-  'builder':    'cheap',       // GPT-5.4 Mini — 100% pass A+B tier (tu default DeepSeek 40%)
-  'dispatcher': 'fast'         // Gemini 3 Flash — synthesize ket qua
+  'architect':  'architect', // Claude Opus 4.6 — SA, system design, task cuc kho (2% workload)
+  'tech-lead':  'cheap',     // GPT-5.4 Mini — review/reasoning, 100% R-tier pass
+  'planner':    'cheap',     // GPT-5.4 Mini — plan, 100% A+B+R pass, stage-RAG tu dong inject
+  'fe-dev':     'cheap',     // GPT-5.4 Mini — 100% pass, re nhat
+  'be-dev':     'cheap',     // GPT-5.4 Mini — 100% pass, re nhat
+  'reviewer':   'fast',      // Gemini 3 Flash — scan nhanh, direct Google quota
+  'debugger':   'cheap',     // GPT-5.4 Mini — trace, 100% R-tier (R02 WIN qwen3-plus)
+  'scanner':    'cheap',     // GPT-5.4 Mini — quet project, doc file
+  'docs':       'cheap',     // GPT-5.4 Mini — text generation
+  'builder':    'cheap',     // GPT-5.4 Mini — 100% pass A+B tier
+  'dispatcher': 'fast'       // Gemini 3 Flash — synthesize ket qua
 };
 
 // === Scanner Prompt — quet project, thu thap context (cheap, re) ===

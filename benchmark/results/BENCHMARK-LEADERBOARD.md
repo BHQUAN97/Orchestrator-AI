@@ -114,12 +114,13 @@ Retry lan 2 (2026-04-18 Round 3 end) van 429 tat ca → **khong kha dung tren fr
 | smart (Sonnet) | $122 | $3,660 | **Khong dung** (user request) |
 | default (DeepSeek) | $70 | $2,100 | **Tranh** — pass 40% |
 
-**Router mix de xuat (v2.2 sau bench Qwen)**:  
-- 85% cheap (builder/fe-dev/be-dev/scanner/docs) = $7.65/day  
-- 10% qwen3-plus (planner/tech-lead/debugger) = $5/day  
+**Router mix de xuat (v2.3 — sau R-tier reasoning bench)**:  
+- 95% cheap (moi role tru architect + reviewer/dispatcher) = $9.50/day  
 - 3% fast (reviewer/dispatcher) = $1.35/day  
 - 2% architect Opus (architect) = $1.2/day  
-**Tong: ~$15/day = $450/month** cho 1000 task/day — **giam 45% so v2.1** ($810).
+**Tong: ~$12/day = $360/month** cho 1000 task/day — **giam 56% so v2.1** ($810), **giam 20% so v2.2** ($450).
+
+**Ket luan v2.3**: qwen3-plus bi remove khoi role map vi ton 12x nhung khong tot hon cheap. Giu trong litellm_config.yaml nhu explicit opt-in khi can 1M ctx > 400K (hiem).
 
 Neu budget 0: free-nemotron-nano 80% pass nhung bi bill ~$55/day, van co chi phi. True free = $0 khong co o pass >= 60%.
 
@@ -180,6 +181,7 @@ Sau do tinh lai rank theo P/P + update MODEL-RECOMMENDATIONS.md phan tuong ung.
 | Round 1 (baseline) | 2026-04-18 | cheap, fast-or, default, smart, free-glm, free-minimax | 94a3cbb | `2026-04-18-MODEL-RECOMMENDATIONS.md` |
 | Round 2 (expand) | 2026-04-18 | free-nemotron-{nano,super,gemma4-31b/26b} (+4 khac pending 429) | 9469398 | `2026-04-18-free-expanded-report.md` |
 | Round 3 (Qwen paid) | 2026-04-18 | qwen3-plus (100%), qwen3-coder-flash (40% bo som), qwen3-max (60%) + B-tier qwen3-plus 100% | — | `2026-04-18-mo482pen.jsonl` + `2026-04-18-mo489v2u.jsonl` |
+| Round 4 (R-tier reasoning) | 2026-04-18 | 3 reasoning task tren WebTemplate repo thuc (1.7M code). cheap + qwen3-plus deu 100% pass NHUNG cheap ton 1/12 cost, tim duoc leak qwen3-plus miss → **cheap dominates ca reasoning, v2.3 loai qwen3-plus khoi role map** | 927e159→revert | `2026-04-18-mo496zvr.jsonl` |
 
 ### Change log cac tiebreaker rules
 - 2026-04-18: add ReDoS heuristic + 5 CRIT crash guards (fix from fuzz test) — khong anh huong pass rate cua 5 A-tier task (input deterministic, khong trigger edge case), pass rate giu nguyen sau fix.
