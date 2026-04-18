@@ -1,9 +1,15 @@
 # ADR-0001: 5-Tier Model Hierarchy (Cost-Optimized Agent Routing)
 
-- **Status**: accepted
+- **Status**: superseded by ADR-0011 (2026-04-18)
 - **Date**: 2026-04-16
 - **Deciders**: BHQUAN97
 - **Tags**: ai-routing, cost, architecture
+
+> ⚠ **Superseded**: ADR-0011 thay the quyet dinh nay sau bench data 2026-04-18 cho thay:
+> - cheap (GPT-5.4 Mini) 100% pass A+B+R tier vs Sonnet 60%, DeepSeek 40%
+> - Sonnet da remove khoi config
+> - Role map v2.3 don gian hon: 95% cheap + 3% fast + 2% architect
+> Xem ADR-0011 de co role map + data hien hanh.
 
 ## Context
 

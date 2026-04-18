@@ -4,7 +4,7 @@
 
 ## Index
 
-- [ADR-0001](0001-five-tier-model-hierarchy.md) — 5-tier model hierarchy (Opus/Sonnet/DeepSeek/Gemini/GPT-Mini)
+- [ADR-0001](0001-five-tier-model-hierarchy.md) — ~~5-tier model hierarchy~~ **(superseded by ADR-0011)**
 - [ADR-0002](0002-structured-json-context.md) — Structured JSON context cho moi agent (chong drift)
 - [ADR-0003](0003-decision-lock-registry.md) — Decision Lock de tranh FE/BE contract drift
 - [ADR-0004](0004-litellm-proxy-gateway.md) — LiteLLM lam abstraction layer, khong call direct
@@ -14,3 +14,4 @@
 - [ADR-0008](0008-lazy-load-optional-modules.md) — Lazy load audit log/feature registry (fail soft)
 - [ADR-0009](0009-bearer-token-api-auth.md) — Bearer token + timing-safe compare cho API
 - [ADR-0010](0010-portal-sse-streaming.md) — Portal mobile-friendly + SSE live stream
+- [ADR-0011](0011-data-driven-model-selection.md) — **Data-driven model selection v2.3** (bench-grounded, supersedes 0001)

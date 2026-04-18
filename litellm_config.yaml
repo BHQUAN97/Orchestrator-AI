@@ -31,6 +31,7 @@ model_list:
 
   # fast: Gemini 3 Flash Preview truc tiep (pin primary, khong duplicate)
   # Neu het quota Google, dung model "fast-or" de di OpenRouter
+  # Note: alias "gemini" duoi day tro den cung model — giu cho backward-compat
   - model_name: "fast"
     litellm_params:
       model: "gemini/gemini-3-flash-preview"
@@ -61,6 +62,7 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
+  # gemini: backward-compat alias cho "fast" (cung tro den gemini-3-flash-preview direct)
   - model_name: "gemini"
     litellm_params:
       model: "gemini/gemini-3-flash-preview"
@@ -83,6 +85,7 @@ model_list:
   # Neu MOT ngay can Sonnet lai: them lai entry voi ly do cu the trong commit message.
   # Xem docs/MODEL-COMPARISON.md cho du lieu bench.
 
+  # gpt-mini: backward-compat alias cho "cheap" (cung tro den gpt-5.4-mini qua OpenRouter)
   - model_name: "gpt-mini"
     litellm_params:
       model: "openai/openai/gpt-5.4-mini"
