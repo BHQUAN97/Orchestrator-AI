@@ -128,6 +128,69 @@ Breakdown:
 
 → **Action**: Task #7, #8 giảm scope từ "wire từ đầu" xuống "audit + document + fix gap nếu có".
 
+## Phát hiện #5 — Token inefficiency trong agent loop (2026-04-18)
+
+**Bối cảnh**: Chạy thử T01 (đếm async function trong `lib/agent-loop.js` — task đơn giản) với model `fast` (Gemini Flash).
+
+**Kết quả**: Agent xài **68983 input token + 176 output token** trong 8 iteration → vượt OpenRouter free tier context limit (14466) → FAIL.
+
+**Trace**:
+1. Agent gọi `list_files` → OK
+2. `search_files` → ENOTDIR error (path bug)
+3. `read_file` lần 1 (line 1-200)
+4. `execute_command grep` → trả 0 (grep args có thể wrong)
+5. `execute_command grep` lần 2 → trả 0
+6. `read_file` lần 2 (line 201-700)
+7. `read_file` lần 3 (line 701-1163) → đọc hết file
+8. Gửi LLM lại với full context = 16K+ tokens → vượt limit
+
+**Gap phát hiện**:
+- Agent KHÔNG dừng khi grep đã đủ thông tin (giữ đọc full file)
+- Context rolling không evict tool result cũ khi task đơn giản
+- Prompt cache không hit (cache hit: 0%)
+
+**So với Claude Code**: Claude Code 1-2 tool call là xong task này (grep đơn + đếm). OrcAI dùng 8 iteration.
+
+**Action**:
+- [ ] **Opt 1**: Thêm system prompt hint cho `--direct` mode: "Ưu tiên grep/wc trước, không read_file full"
+- [ ] **Opt 2**: Cache control ở message level — detect khi tool result trùng lặp
+- [ ] **Opt 3**: Stuck detector đã có (`lib/stuck-detector.js`) — kiểm tra có hoạt động không
+- [ ] **Opt 4**: Review `lib/context-guard.js` có evict đúng không
+
+**Priority**: High — đây là core efficiency bug, ảnh hưởng MỌI task, không chỉ benchmark.
+
+## Phát hiện #6 — OpenRouter free tier không đủ benchmark (2026-04-18)
+
+**Status**: OpenRouter free tier context window ≈ 14K token cho `fast` (Gemini). Benchmark thực tế thường cần 20-50K.
+
+**Action cần user quyết**:
+1. Nạp credit OpenRouter ($10+) → tier cao hơn, context rộng hơn
+2. HOẶC switch sang Gemini API direct (free quota 1500 req/day, context 1M)
+3. HOẶC dùng Moonshot API direct (free tier Kimi K2)
+
+→ **Blocker cho Bước E (full benchmark run)**. Các bước A-D đã xong.
+
+---
+
+## Nhật ký phiên 2026-04-18 — Tổng kết
+
+**Đã làm** (9/14 task complete, 1 in_progress, 4 pending):
+- ✅ Khảo sát + 6 phát hiện quan trọng
+- ✅ IMPROVEMENT-LOG.md + BENCHMARK-PLAN.md
+- ✅ 17 commit git (clean state, tag benchmark-baseline-2026-04-18, push GitHub)
+- ✅ Test baseline 164/164 pass sau refactor
+- ✅ Benchmark harness đầy đủ (runner + verify + scorer + 9 smoke test pass)
+- ✅ Dry run → phát hiện token inefficiency + credit limit
+
+**Blocker**:
+- OpenRouter credit / cần chọn provider khác trước khi chạy full benchmark
+
+**Tiếp theo khi user đáp ứng blocker**:
+- Bước E: Full benchmark 25 task × 4 model
+- Task #6: GitHub Actions CI
+- Task #9: Extended thinking wire
+- Fix phát hiện #5 (token efficiency)
+
 ---
 
 ## Nguyên tắc
