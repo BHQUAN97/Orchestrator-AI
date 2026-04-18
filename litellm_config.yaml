@@ -21,13 +21,13 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 10
 
-  # smart: Claude Sonnet 4.6 qua OpenRouter (upgrade tu Sonnet 4)
+  # smart: Gemini 3 Flash truc tiep (switched tu Claude Sonnet 4.6 — user 2026-04-18)
+  # Neu can premium quality tren anthropic: dung alias "sonnet" (explicit opt-in) hoac "architect" (opus)
   - model_name: "smart"
     litellm_params:
-      model: "openai/anthropic/claude-sonnet-4-6"
-      api_base: "https://openrouter.ai/api/v1"
-      api_key: "os.environ/OPENROUTER_API_KEY"
-      rpm: 20
+      model: "gemini/gemini-3-flash-preview"
+      api_key: "os.environ/GEMINI_API_KEY"
+      rpm: 60
 
   # fast: Gemini 3 Flash Preview truc tiep (pin primary, khong duplicate)
   # Neu het quota Google, dung model "fast-or" de di OpenRouter
@@ -74,6 +74,7 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 10
 
+  # sonnet: explicit opt-in only (user yeu cau khong dung Sonnet lam default 2026-04-18)
   - model_name: "sonnet"
     litellm_params:
       model: "openai/anthropic/claude-sonnet-4-6"
