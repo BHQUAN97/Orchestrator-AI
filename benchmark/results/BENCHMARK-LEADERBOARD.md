@@ -66,15 +66,22 @@ Sap xep theo P/P giam dan (model tot nhat len dau).
 † `∞` = free true, nhung pass < 50% nen **Skip** du P/P infinite.  
 †† free-minimax timeout parse fail, cost data khong dang tin cay.
 
-### Pending (chua test — 429 rate-limit luc run)
-Model ton tai tren OpenRouter free tier nhung upstream 429 lien tuc 3 lan. Retry phien sau khi traffic giam:
+### Pending (chua test — 429 rate-limit dai han)
+4 model ton tai tren OpenRouter free tier nhung upstream 429 lien tuc.
+Retry lan 2 (2026-04-18 Round 3 end) van 429 tat ca → **khong kha dung tren free tier OpenRouter o thoi diem nay**.
 
 | Model ID | Alias | Ctx | Size | Ghi chu |
 |---|---|---|---|---|
-| `qwen/qwen3-coder:free` | free-qwen-coder | 262K | 480B | Coder-optimized, **uu tien retry** |
+| `qwen/qwen3-coder:free` | free-qwen-coder | 262K | 480B | Coder-optimized, **uu tien retry khi co credit** |
 | `qwen/qwen3-next-80b-a3b-instruct:free` | free-qwen-next | 262K | 80B | Next-gen Qwen |
 | `nousresearch/hermes-3-llama-3.1-405b:free` | free-hermes | 131K | 405B | Largest free tier |
 | `meta-llama/llama-3.3-70b-instruct:free` | free-llama70b | 65K | 70B | Meta 70B |
+
+**Option de unblock**:
+1. Nap credit OpenRouter (rate limit nhe hon) → retry
+2. Dung Chutes.ai free tier (upstream provider khac) → them model paid variant
+3. Doi vai ngay/tuan → traffic free tier giam
+4. Skip nhung model nay, focus cac free model kha dung khac (gemma-3-27b, nemotron-nano-9b...)
 
 ---
 
