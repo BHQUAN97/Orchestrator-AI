@@ -89,6 +89,32 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
+  # === Qwen 3.x paid variants (bench candidates 2026-04-18) ===
+
+  # qwen3-plus: Qwen 3.5 Plus — general purpose, 1M ctx, ~$0.26/1M in
+  - model_name: "qwen3-plus"
+    litellm_params:
+      model: "openai/qwen/qwen3.5-plus-02-15"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # qwen3-coder-flash: coder-tuned, 1M ctx, ~$0.195/1M in — re nhat tier coder
+  - model_name: "qwen3-coder-flash"
+    litellm_params:
+      model: "openai/qwen/qwen3-coder-flash"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # qwen3-max: top tier, 262K ctx, ~$0.78/1M in — de doi sanh architect Opus
+  - model_name: "qwen3-max"
+    litellm_params:
+      model: "openai/qwen/qwen3-max"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 15
+
   # Legacy — giu lai de fallback
   - model_name: "kimi"
     litellm_params:

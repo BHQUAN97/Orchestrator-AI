@@ -33,20 +33,28 @@ const { PipelineTracer } = require('../lib/pipeline-tracer');
 const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:5002';
 const LITELLM_KEY = process.env.LITELLM_KEY || 'sk-master-change-me';
 
-// === Agent Role → Model mapping (v2.1 — 2026-04-16) ===
-// 5 tiers: architect > smart > default > fast > cheap
+// === Agent Role → Model mapping (v2.2 — 2026-04-18 rebalance sau bench Qwen) ===
+//
+// Bench A+B-tier (10 task) 2026-04-18:
+//   cheap (GPT-5.4 Mini):  100% pass, $0.010/task, 12s  ← WINNER moi role thuong
+//   qwen3-plus:             100% pass, $0.050/task, 20s, 1M ctx  ← long-context
+//   default (DeepSeek):     40%  pass, $0.070/task, 56s  ← BO
+//   smart (Sonnet cu):      60%  pass, $0.122/task      ← BO (user request)
+//
+// Chien luoc: cheap = workhorse 90%, qwen3-plus cho long-context/reasoning,
+// architect (Opus) chi khi SA/design kho.
 const AGENT_ROLE_MAP = {
-  'architect':  'architect', // Claude Opus 4.6 — SA, system design, task cuc kho
-  'tech-lead':  'smart',     // Claude Sonnet 4.6 — review, escalation, reasoning
-  'planner':    'default',   // DeepSeek V3.2 — xay dung plan tu scan data
-  'fe-dev':     'default',   // DeepSeek V3.2 — full-stack code gen
-  'be-dev':     'default',   // DeepSeek V3.2 — full-stack code gen
-  'reviewer':   'fast',      // Gemini 3 Flash — scan nhanh, re
-  'debugger':   'smart',     // Claude Sonnet 4.6 — trace sau
-  'scanner':    'cheap',     // GPT-5.4 Mini — quet project, doc file. Set 'local' cho offline mode
-  'docs':       'cheap',     // GPT-5.4 Mini — text generation. Set 'local' cho offline mode
-  'builder':    'default',   // DeepSeek V3.2 — general code
-  'dispatcher': 'fast'       // Gemini 3 Flash — synthesize ket qua
+  'architect':  'architect',   // Claude Opus 4.6 — SA, system design, task cuc kho (2% workload)
+  'tech-lead':  'qwen3-plus',  // Qwen3.5 Plus — review/reasoning 1M ctx, re hon Sonnet 60x
+  'planner':    'qwen3-plus',  // Qwen3.5 Plus — plan voi 1M ctx (tu default DeepSeek 40% pass)
+  'fe-dev':     'cheap',       // GPT-5.4 Mini — 100% pass, re nhat (tu default)
+  'be-dev':     'cheap',       // GPT-5.4 Mini — 100% pass, re nhat (tu default)
+  'reviewer':   'fast',        // Gemini 3 Flash — scan nhanh, re
+  'debugger':   'qwen3-plus',  // Qwen3.5 Plus — trace sau can ctx lon (tu Sonnet)
+  'scanner':    'cheap',       // GPT-5.4 Mini — quet project, doc file
+  'docs':       'cheap',       // GPT-5.4 Mini — text generation
+  'builder':    'cheap',       // GPT-5.4 Mini — 100% pass A+B tier (tu default DeepSeek 40%)
+  'dispatcher': 'fast'         // Gemini 3 Flash — synthesize ket qua
 };
 
 // === Scanner Prompt — quet project, thu thap context (cheap, re) ===

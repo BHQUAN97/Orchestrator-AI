@@ -4,7 +4,7 @@
 > Dung file nay lam **nguon chinh thuc** khi so sanh model moi voi model cu.
 > Moi lan them model moi, chi can chay cung harness + cung task set roi append 1 row.
 
-**Last updated**: 2026-04-18 (Round 2 — 8 free models added)
+**Last updated**: 2026-04-18 (Round 3 — 3 Qwen paid variants added)
 
 ---
 
@@ -52,19 +52,23 @@ Sap xep theo P/P giam dan (model tot nhat len dau).
 
 | Rank | Model ID | Alias | Pass% | Cost/task | Cost/Pass | P/P | Avg Wall | Max Wall | Ctx | Tier | Use case |
 |:-:|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|---|
-| 1 | `openai/openai/gpt-5.4-mini` | **cheap** | **100%** | $0.009 | $0.009 | **112.4** | 7.4s | 10s | 400K | Paid | **Production default** — 80% workload |
+| 1 | `openai/openai/gpt-5.4-mini` | **cheap** | **100%** | $0.009 | $0.009 | **112.4** | 7.4s | 10s | 400K | Paid | **Production default** — 90% workload (A+B tier) |
 | 2 | `openai/google/gemini-3-flash-preview` | **fast-or** | **100%** | $0.045 | $0.045 | **22.5** | 10.8s | 14s | 1M | Paid | Long context, 1M token |
-| 3 | `nvidia/nemotron-3-nano-30b-a3b:free` | **free-nemotron-nano** | **80%** | $0.055 | $0.069 | **14.5** | 17s | 21s | 256K | Free | Prototype nhanh, free tier |
-| 4 | `nvidia/nemotron-3-super-120b-a12b:free` | **free-nemotron-super** | **80%** | $0.061 | $0.076 | **13.2** | 53s | 67s | 262K | Free | Backup neu nano rate-limit |
-| 5 | `z-ai/glm-4.5-air:free` | **free-glm** | 60% | $0.06 | $0.10 | 9.8 | 64s | 95s | 131K | Free | Prototype cham, round 1 |
-| 6 | `deepseek/deepseek-v3.2` | **default** | 40% | $0.070 | $0.175 | 5.7 | 56s | 72s | 128K | Paid | **Tranh** — cham + token-heavy |
-| 7 | `anthropic/claude-sonnet-4-6` | **smart** | 60% | $0.122 | $0.203 | 4.9 | 10.4s | 15s | 200K | Paid | Architecture/security only |
-| 8 | `google/gemma-4-31b-it:free` | **free-gemma4-31b** | 40% | $0 | — | ∞† | 78s | 120s | 262K | Free | Khong du threshold |
-| 9 | `google/gemma-4-26b-a4b-it:free` | **free-gemma4-26b** | 40% | $0 | — | ∞† | 78s | 120s | 262K | Free | Khong du threshold |
-| 10 | `minimax/minimax-m2.5:free` | **free-minimax** | 40% | $0†† | — | ∞† | 66s | 120s | 196K | Free | Timeout nhieu |
+| 3 | `qwen/qwen3.5-plus-02-15` | **qwen3-plus** | **100%** | $0.050 | $0.050 | **20.0** | 20s | 36s | 1M | Paid | **Long-context + reasoning** — planner/tech-lead/debugger |
+| 4 | `nvidia/nemotron-3-nano-30b-a3b:free` | **free-nemotron-nano** | **80%** | $0.055 | $0.069 | **14.5** | 17s | 21s | 256K | Free | Prototype nhanh, free tier |
+| 5 | `nvidia/nemotron-3-super-120b-a12b:free` | **free-nemotron-super** | **80%** | $0.061 | $0.076 | **13.2** | 53s | 67s | 262K | Free | Backup neu nano rate-limit |
+| 6 | `z-ai/glm-4.5-air:free` | **free-glm** | 60% | $0.06 | $0.10 | 9.8 | 64s | 95s | 131K | Free | Prototype cham, round 1 |
+| 7 | `qwen/qwen3-max` | **qwen3-max** | 60% | $0.080 | $0.133 | 7.5 | 31s | 50s | 262K | Paid | **Tranh** — kem qwen3-plus o moi mat |
+| 8 | `deepseek/deepseek-v3.2` | **default** | 40% | $0.070 | $0.175 | 5.7 | 56s | 72s | 128K | Paid | **Tranh** — cham + token-heavy |
+| 9 | `anthropic/claude-sonnet-4-6` | **smart/sonnet** | 60% | $0.122 | $0.203 | 4.9 | 10.4s | 15s | 200K | Paid | **Khong dung** (user request) — explicit opt-in only |
+| 10 | `qwen/qwen3-coder-flash` | **qwen3-coder-flash** | 40% | $0.002 | $0.006 | 66.7‡ | 12.4s | 20s | 1M | Paid | **Skip** — bo cuoc som (1.2 iter avg) |
+| 11 | `google/gemma-4-31b-it:free` | **free-gemma4-31b** | 40% | $0 | — | ∞† | 78s | 120s | 262K | Free | Khong du threshold |
+| 12 | `google/gemma-4-26b-a4b-it:free` | **free-gemma4-26b** | 40% | $0 | — | ∞† | 78s | 120s | 262K | Free | Khong du threshold |
+| 13 | `minimax/minimax-m2.5:free` | **free-minimax** | 40% | $0†† | — | ∞† | 66s | 120s | 196K | Free | Timeout nhieu |
 
 † `∞` = free true, nhung pass < 50% nen **Skip** du P/P infinite.  
-†† free-minimax timeout parse fail, cost data khong dang tin cay.
+†† free-minimax timeout parse fail, cost data khong dang tin cay.  
+‡ qwen3-coder-flash co cost thap vi bo cuoc som (1.2 iter avg) — pass 40% khong dang tin.
 
 ### Pending (chua test — 429 rate-limit dai han)
 4 model ton tai tren OpenRouter free tier nhung upstream 429 lien tuc.
@@ -104,14 +108,18 @@ Retry lan 2 (2026-04-18 Round 3 end) van 429 tat ca → **khong kha dung tren fr
 | Model | Cost/day | Cost/month | Ghi chu |
 |---|:-:|:-:|---|
 | cheap | $9 | $270 | **Winner** — re nhat khi pass 100% |
+| qwen3-plus | $50 | $1,500 | Long-context/reasoning — 1M ctx, 100% pass |
 | fast-or | $45 | $1,350 | Them $45/day cho 1M context |
 | free-nemotron-nano | $55 | $1,650 | Bi bill nho (~$0.055/task) du :free |
-| free-nemotron-super | $61 | $1,830 | Bi bill nho, cham hon nano |
-| free-glm | $60 | $1,800 | Bill nho tu OpenRouter fallback |
-| smart | $122 | $3,660 | Chi dung 5% workload (architecture) |
-| default (DeepSeek) | $70 | $2,100 | **Tranh** — pass 40%, re o danh nghia nhung Cost/Pass cao |
+| smart (Sonnet) | $122 | $3,660 | **Khong dung** (user request) |
+| default (DeepSeek) | $70 | $2,100 | **Tranh** — pass 40% |
 
-**Router mix de xuat**: 80% cheap + 15% fast-or + 5% smart = ~$27/day = **$810/month** cho 1000 task/day.
+**Router mix de xuat (v2.2 sau bench Qwen)**:  
+- 85% cheap (builder/fe-dev/be-dev/scanner/docs) = $7.65/day  
+- 10% qwen3-plus (planner/tech-lead/debugger) = $5/day  
+- 3% fast (reviewer/dispatcher) = $1.35/day  
+- 2% architect Opus (architect) = $1.2/day  
+**Tong: ~$15/day = $450/month** cho 1000 task/day — **giam 45% so v2.1** ($810).
 
 Neu budget 0: free-nemotron-nano 80% pass nhung bi bill ~$55/day, van co chi phi. True free = $0 khong co o pass >= 60%.
 
@@ -171,6 +179,7 @@ Sau do tinh lai rank theo P/P + update MODEL-RECOMMENDATIONS.md phan tuong ung.
 |---|---|---|---|---|
 | Round 1 (baseline) | 2026-04-18 | cheap, fast-or, default, smart, free-glm, free-minimax | 94a3cbb | `2026-04-18-MODEL-RECOMMENDATIONS.md` |
 | Round 2 (expand) | 2026-04-18 | free-nemotron-{nano,super,gemma4-31b/26b} (+4 khac pending 429) | 9469398 | `2026-04-18-free-expanded-report.md` |
+| Round 3 (Qwen paid) | 2026-04-18 | qwen3-plus (100%), qwen3-coder-flash (40% bo som), qwen3-max (60%) + B-tier qwen3-plus 100% | — | `2026-04-18-mo482pen.jsonl` + `2026-04-18-mo489v2u.jsonl` |
 
 ### Change log cac tiebreaker rules
 - 2026-04-18: add ReDoS heuristic + 5 CRIT crash guards (fix from fuzz test) — khong anh huong pass rate cua 5 A-tier task (input deterministic, khong trigger edge case), pass rate giu nguyen sau fix.
