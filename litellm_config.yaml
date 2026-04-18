@@ -140,6 +140,72 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 20
 
+  # === FREE TIER — Expanded batch 2026-04-18 ===
+
+  # Qwen3 Coder (alias for bench — same model as free-qwen but separate entry)
+  - model_name: "free-qwen-coder"
+    litellm_params:
+      model: "openai/qwen/qwen3-coder:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Qwen3 Next 80B A3B Instruct — MoE architecture, 131K ctx
+  - model_name: "free-qwen-next"
+    litellm_params:
+      model: "openai/qwen/qwen3-next-80b-a3b-instruct:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Nous Hermes 3 Llama 3.1 405B — large reasoning model
+  - model_name: "free-hermes"
+    litellm_params:
+      model: "openai/nousresearch/hermes-3-llama-3.1-405b:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Nvidia Nemotron Super 120B A12B — MoE, 131K ctx
+  - model_name: "free-nemotron-super"
+    litellm_params:
+      model: "openai/nvidia/nemotron-3-super-120b-a12b:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Nvidia Nemotron Nano 30B A3B — lightweight MoE
+  - model_name: "free-nemotron-nano"
+    litellm_params:
+      model: "openai/nvidia/nemotron-3-nano-30b-a3b:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Google Gemma 4 31B IT — dense instruct, 131K ctx
+  - model_name: "free-gemma4-31b"
+    litellm_params:
+      model: "openai/google/gemma-4-31b-it:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Google Gemma 4 26B A4B IT — MoE instruct variant
+  - model_name: "free-gemma4-26b"
+    litellm_params:
+      model: "openai/google/gemma-4-26b-a4b-it:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Meta Llama 3.3 70B Instruct (alias — separate entry for bench isolation)
+  - model_name: "free-llama70b"
+    litellm_params:
+      model: "openai/meta-llama/llama-3.3-70b-instruct:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
   # === LOCAL MODELS (LM Studio @ localhost:1234) ===
   # Hybrid strategy: local SUPPLEMENTS cloud, khong replace.
   # Khi chay ngoai Docker: override api_base bang env LMSTUDIO_URL (vd http://localhost:1234/v1)

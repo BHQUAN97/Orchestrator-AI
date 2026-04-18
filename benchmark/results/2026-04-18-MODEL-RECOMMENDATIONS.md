@@ -106,6 +106,53 @@ model_list:
 | 5 | Router `fast` khong pin | `litellm_config.yaml`: tach `fast-or` |
 | 6 | Gemini free quota 20/day | Dung `fast-or` qua OpenRouter |
 
+---
+
+### Expanded free models (2026-04-18 round 2)
+
+> Thêm 8 model mới từ OpenRouter free tier. Run: `2026-04-18-mo44ebwj.jsonl`
+
+#### Ping test (Phase 2): 4/8 pass
+
+| Model | Ping | Ghi chú |
+|---|---|---|
+| free-nemotron-super | PASS | nvidia/nemotron-3-super-120b-a12b |
+| free-nemotron-nano | PASS | nvidia/nemotron-3-nano-30b-a3b |
+| free-gemma4-31b | PASS | google/gemma-4-31b-it |
+| free-gemma4-26b | PASS | google/gemma-4-26b-a4b-it |
+| free-qwen-coder | FAIL 429 | qwen/qwen3-coder — upstream rate-limit |
+| free-qwen-next | FAIL 429 | qwen/qwen3-next-80b-a3b-instruct — upstream rate-limit |
+| free-hermes | FAIL 429 | nousresearch/hermes-3-llama-3.1-405b — upstream rate-limit |
+| free-llama70b | FAIL 429 | meta-llama/llama-3.3-70b-instruct — upstream rate-limit |
+
+#### A-tier results (4 models tested)
+
+| Model | Pass% | Cost | P/P | Avg Wall | vs old free |
+|---|---|---|---|---|---|
+| **free-nemotron-nano** | **80%** | $0.055/task | **14.5** | 17s | >> free-glm (60%) |
+| **free-nemotron-super** | **80%** | $0.061/task | **13.2** | 53s | >> free-glm (60%) |
+| free-gemma4-31b | 40% | $0 | — | 78s | = free-minimax |
+| free-gemma4-26b | 40% | $0 | — | 78s | = free-minimax |
+
+#### Updated all-model ranking (paid + free)
+
+| Rank | Model | Pass% | P/P | Wall | Tier |
+|---|---|---|---|---|---|
+| 1 | cheap (GPT-5.4-mini) | 100% | 112.4 | 7s | Paid |
+| 2 | fast-or (Gemini Flash) | 100% | 22.5 | 11s | Paid |
+| 3 | **free-nemotron-nano** | **80%** | **14.5** | **17s** | **Free** |
+| 4 | **free-nemotron-super** | **80%** | **13.2** | **53s** | **Free** |
+| 5 | free-glm | 60% | 9.8 | 64s | Free |
+| 6 | smart (Sonnet 4.6) | 60% | 4.9 | 10s | Paid |
+| 7 | default (DeepSeek V3.2) | 40% | 5.7 | 56s | Paid |
+| 8 | free-minimax | 40% | — | 66s | Free |
+| 9 | free-gemma4-31b | 40% | — | 78s | Free |
+| 10 | free-gemma4-26b | 40% | — | 78s | Free |
+
+**New usable free models**: `free-nemotron-nano` và `free-nemotron-super` — cả hai 80% pass, usable cho prototype/non-critical. Nano nhanh hơn (17s vs 53s avg) nên ưu tiên.
+
+**Wall time caveat**: Nemotron models exceed 30s threshold cho một số tasks (T02 57s, T03 67s). Nếu yêu cầu wall ≤30s strict thì chỉ nano cho T01/T04 đạt.
+
 ## Bug con lai (Priority handoff doc)
 
 - **Token inefficiency** (Priority #1 handoff): agent doc full file thay vi grep
