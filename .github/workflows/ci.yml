@@ -36,6 +36,7 @@ jobs:
           node test/cost-tracker.test.js
           node test/cross-project-memory.test.js
           node test/dynamic-lock-ttl.test.js
+          node test/extended-thinking.test.js
           node test/parity.test.js
           node test/rag-prompt-builder.test.js
           node test/session-continuity.test.js
