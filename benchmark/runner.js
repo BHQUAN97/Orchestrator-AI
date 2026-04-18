@@ -108,12 +108,16 @@ function runOrcai(task, model, workDir) {
 }
 
 function parseMetrics(stdout) {
+  // Format thuc te tu orcai:
+  //   "3 iterations | 3 tool calls | 0 errors"
+  //   "Tokens: 29444 in, 122 out | cache hit: 0% | cost: $0.0081"
   const metrics = { iterations: null, tokens_in: null, tokens_out: null, cost_usd: null };
-  const itMatch = stdout.match(/iteration[s]?\s*[=:]\s*(\d+)/i);
+  const itMatch = stdout.match(/(\d+)\s+iterations?\b/i);
   if (itMatch) metrics.iterations = parseInt(itMatch[1], 10);
-  const costMatch = stdout.match(/\$([\d.]+)\s*(total|cost|usd)/i);
+  const costMatch = stdout.match(/cost:\s*\$([\d.]+)/i) || stdout.match(/\$([\d.]+)\s*(total|cost|usd)/i);
   if (costMatch) metrics.cost_usd = parseFloat(costMatch[1]);
-  const tokMatch = stdout.match(/(\d+)\s*tokens?\s*\(in\).*?(\d+)\s*tokens?\s*\(out\)/i);
+  const tokMatch = stdout.match(/Tokens?:\s*(\d+)\s*in,?\s*(\d+)\s*out/i)
+    || stdout.match(/(\d+)\s*tokens?\s*\(in\).*?(\d+)\s*tokens?\s*\(out\)/i);
   if (tokMatch) { metrics.tokens_in = parseInt(tokMatch[1]); metrics.tokens_out = parseInt(tokMatch[2]); }
   return metrics;
 }

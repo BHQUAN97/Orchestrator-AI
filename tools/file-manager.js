@@ -320,21 +320,35 @@ class FileManager {
     }
     const results = [];
 
-    // Dùng fast-glob để lấy danh sách files
-    const globPattern = include || '**/*';
-    const files = await fg(globPattern, {
-      cwd: resolved,
-      ignore: IGNORE_PATTERNS,
-      onlyFiles: true,
-      deep: 10
-    });
+    // Neu path la file → search 1 file, khong glob
+    // Tra ve: { success, results: [{file, line, content}] }
+    let files;
+    let baseDir;
+    try {
+      const stat = fs.statSync(resolved);
+      if (stat.isFile()) {
+        baseDir = path.dirname(resolved);
+        files = [path.basename(resolved)];
+      } else {
+        baseDir = resolved;
+        const globPattern = include || '**/*';
+        files = await fg(globPattern, {
+          cwd: resolved,
+          ignore: IGNORE_PATTERNS,
+          onlyFiles: true,
+          deep: 10
+        });
+      }
+    } catch (e) {
+      return { success: false, error: `Path not found or inaccessible: ${searchPath}` };
+    }
 
     const regex = new RegExp(pattern, 'gi');
 
     for (const file of files) {
       if (results.length >= max_results) break;
 
-      const fullPath = path.join(resolved, file);
+      const fullPath = path.join(baseDir, file);
       try {
         const stat = fs.statSync(fullPath);
         // Bỏ qua file lớn (> 500KB) hoặc binary

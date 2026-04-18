@@ -36,15 +36,29 @@ function report(records) {
   out += `- Unique tasks: ${new Set(records.map(r => r.task)).size}\n`;
   out += `- Models tested: ${[...byModel.keys()].join(', ')}\n\n`;
 
-  out += `## Pass rate by model\n\n`;
-  out += `| Model | Pass | Total | % | Avg wall_ms | Avg cost_usd |\n|---|---|---|---|---|---|\n`;
+  out += `## Pass rate + P/P (Price/Performance) by model\n\n`;
+  out += `P/P score = pass_rate / avg_cost — cao hon = hieu qua hon (pass nhieu voi gia re).\n\n`;
+  out += `| Model | Pass | Total | % | Avg wall_ms | Avg cost_usd | Cost-per-Pass | P/P score |\n|---|---|---|---|---|---|---|---|\n`;
+  const modelRows = [];
   for (const [model, rs] of byModel) {
     const pass = rs.filter(r => r.correct).length;
     const avgMs = rs.reduce((a, r) => a + (r.wall_ms || 0), 0) / rs.length;
     const costs = rs.map(r => r.cost_usd).filter(c => c != null);
     const avgCost = costs.length ? costs.reduce((a, b) => a + b, 0) / costs.length : null;
-    out += `| ${model} | ${pass} | ${rs.length} | ${pct(pass, rs.length)} | ${avgMs.toFixed(0)} | ${avgCost != null ? '$' + avgCost.toFixed(4) : '—'} |\n`;
+    const passRate = pass / rs.length;
+    const costPerPass = (avgCost != null && pass > 0)
+      ? (rs.reduce((a, r) => a + (r.cost_usd || 0), 0) / pass) : null;
+    const pp = (avgCost != null && avgCost > 0) ? (passRate / avgCost) : null;
+    modelRows.push({ model, pass, total: rs.length, passRate, avgMs, avgCost, costPerPass, pp });
   }
+  modelRows.sort((a, b) => (b.pp || 0) - (a.pp || 0));
+  for (const r of modelRows) {
+    out += `| ${r.model} | ${r.pass} | ${r.total} | ${pct(r.pass, r.total)} | ${r.avgMs.toFixed(0)} | `
+      + `${r.avgCost != null ? '$' + r.avgCost.toFixed(4) : '—'} | `
+      + `${r.costPerPass != null ? '$' + r.costPerPass.toFixed(4) : '—'} | `
+      + `${r.pp != null ? r.pp.toFixed(1) : '—'} |\n`;
+  }
+  out += `\n**Cost-per-Pass** = tong cost / so task pass (cang thap cang re). **P/P score** = pass_rate / avg_cost (cao = hieu qua).\n`;
 
   out += `\n## Pass rate by tier\n\n`;
   out += `| Tier | Pass | Total | % |\n|---|---|---|---|\n`;

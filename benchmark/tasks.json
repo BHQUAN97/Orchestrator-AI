@@ -3,14 +3,14 @@
     "id": "T01",
     "tier": "A",
     "title": "Count async functions",
-    "prompt": "Count how many async functions are in the file lib/agent-loop.js (just a number). Use read_file or grep tool, output the final count in your final message.",
+    "prompt": "Count all occurrences of the keyword 'async' in the file lib/agent-loop.js (includes async functions, async methods, async arrow functions). Use search_files tool with pattern 'async' (or read_file then count). In your final message output exactly one line in this format: ASYNC_COUNT=<number>",
     "fixture": "repo-snapshot",
     "max_iterations": 8,
     "timeout_s": 60,
-    "budget_usd": 0.05,
+    "budget_usd": 0.20,
     "verify": {
       "type": "stdout_match",
-      "pattern": "\\b([0-9]+)\\s*async",
+      "pattern": "ASYNC_COUNT\\s*=\\s*([0-9]+)",
       "expected_min": 5,
       "expected_max": 100
     }
@@ -23,7 +23,7 @@
     "fixture": "repo-snapshot",
     "max_iterations": 8,
     "timeout_s": 90,
-    "budget_usd": 0.05,
+    "budget_usd": 0.20,
     "verify": {
       "type": "file_content_regex",
       "path": "lib/plan-mode.js",
@@ -54,7 +54,7 @@
     "fixture": "repo-snapshot",
     "max_iterations": 5,
     "timeout_s": 60,
-    "budget_usd": 0.05,
+    "budget_usd": 0.20,
     "verify": {
       "type": "stdout_match",
       "pattern": "TYPO:\\s*\\S+\\s*->\\s*\\S+"
@@ -68,7 +68,7 @@
     "fixture": "repo-snapshot",
     "max_iterations": 6,
     "timeout_s": 60,
-    "budget_usd": 0.05,
+    "budget_usd": 0.20,
     "verify": {
       "type": "stdout_match",
       "pattern": "read_file[\\s\\S]*write_file[\\s\\S]*execute_command"

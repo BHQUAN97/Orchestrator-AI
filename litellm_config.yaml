@@ -29,15 +29,16 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 20
 
-  # fast: Gemini 3 Flash Preview truc tiep (upgrade tu 2.5 Flash)
+  # fast: Gemini 3 Flash Preview truc tiep (pin primary, khong duplicate)
+  # Neu het quota Google, dung model "fast-or" de di OpenRouter
   - model_name: "fast"
     litellm_params:
       model: "gemini/gemini-3-flash-preview"
       api_key: "os.environ/GEMINI_API_KEY"
       rpm: 60
 
-  # fast fallback: Gemini 3 Flash qua OpenRouter
-  - model_name: "fast"
+  # fast-or: Gemini 3 Flash qua OpenRouter (khi Google quota het)
+  - model_name: "fast-or"
     litellm_params:
       model: "openai/google/gemini-3-flash-preview"
       api_base: "https://openrouter.ai/api/v1"

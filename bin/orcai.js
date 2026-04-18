@@ -619,9 +619,10 @@ async function oneShotMode(prompt, projectDir, opts) {
 
   const systemPrompt = await buildSystemPrompt(projectDir, opts.role, opts);
 
-  // Pre-run cost estimate
+  // Pre-run cost estimate — skip khi auto-approve (--yes), --no-confirm, hoac benchmark mode
   const threshold = parseFloat(opts.estimateThreshold || '0.05');
-  if (!opts.yes && threshold > 0) {
+  const skipCostPrompt = opts.yes || opts.confirm === false || process.env.ORCAI_BENCHMARK === '1';
+  if (!skipCostPrompt && threshold > 0) {
     const est = estimatePromptCost({ systemPrompt, userPrompt: expanded, model: opts.model });
     if (est.cost_est_usd >= threshold) {
       console.log(chalk.yellow(`  💰 Estimated cost: $${est.cost_est_usd.toFixed(4)} (range $${est.cost_range_usd[0].toFixed(4)} - $${est.cost_range_usd[1].toFixed(4)}), ~${est.iterations_est} iterations`));
