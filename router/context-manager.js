@@ -570,6 +570,35 @@ Cách escalation: Trả về JSON có "escalation" field:
     }
     return total;
   }
+
+  /**
+   * Doc stack profile da sinh san tu .orcai/stack-profile.md
+   * @param {string} [projectDir] — mac dinh dung this.projectDir
+   * @returns {string|null}
+   */
+  getStackProfile(projectDir) {
+    const dir = projectDir || this.projectDir;
+    const profilePath = path.join(dir, '.orcai', 'stack-profile.md');
+    if (!fs.existsSync(profilePath)) return null;
+    try { return fs.readFileSync(profilePath, 'utf-8'); }
+    catch { return null; }
+  }
+
+  /**
+   * Build system prompt bo sung cho LOCAL model (Qwen, DeepSeek local...).
+   * Muc dich: bo sung conventions cua user de model khong gen code cu.
+   * Khong modify prompt-build flow hien tai — chi expose helper.
+   *
+   * @param {string} [projectDir]
+   * @param {string} [basePrompt] — existing system prompt de noi them
+   * @returns {string}
+   */
+  buildSystemPromptForLocal(projectDir, basePrompt = '') {
+    const profile = this.getStackProfile(projectDir);
+    if (!profile) return basePrompt || '';
+    const base = basePrompt || '';
+    return `${base}\n\n=== USER'S STACK PROFILE ===\n${profile}`;
+  }
 }
 
 module.exports = { ContextManager, detectTaskDomain, detectStack, EMPTY_CONTEXT };

@@ -14,6 +14,7 @@
 // Moi model co strengths rieng — router match task voi strengths
 
 const { SLMClassifier } = require('./slm-classifier');
+const { forceLocalForPaths, findPrivateMatch } = require('../lib/privacy-rules');
 
 const MODEL_PROFILES = {
   // === v2 lineup (2026-04-16) ===
@@ -94,6 +95,42 @@ const MODEL_PROFILES = {
     speed: 'slow',
     hallucination: 'high',
     description: 'Local model (LM Studio) — free, offline'
+  },
+
+  // === Local hybrid tier (2026-04-17) — LM Studio @ localhost:1234 ===
+  // Dung SUPPLEMENT cloud, khong replace. Chay khi task trivial hoac privacy-sensitive.
+
+  'local-classifier': {
+    litellm_name: 'local-classifier',
+    strengths: ['classify', 'intent', 'simple_fix'],
+    weaknesses: ['complex_logic', 'architecture', 'multi_file'],
+    max_context: 32000,
+    cost_per_1m_input: 0,
+    speed: 'fast',
+    hallucination: 'medium',
+    description: 'Qwen2.5-Coder 1.5B — classifier tier, phan loai intent sieu re'
+  },
+
+  'local-workhorse': {
+    litellm_name: 'local-workhorse',
+    strengths: ['docs', 'comment', 'rename', 'format', 'simple_fix', 'explain'],
+    weaknesses: ['complex_logic', 'architecture'],
+    max_context: 32000,
+    cost_per_1m_input: 0,
+    speed: 'medium',
+    hallucination: 'medium',
+    description: 'Qwen2.5-Coder 3B — task trivial, docs, rename'
+  },
+
+  'local-heavy': {
+    litellm_name: 'local-heavy',
+    strengths: ['backend', 'frontend', 'logic', 'simple_fix', 'review', 'docs', 'comment'],
+    weaknesses: ['architecture', 'system_design'],
+    max_context: 32000,
+    cost_per_1m_input: 0,
+    speed: 'slow',
+    hallucination: 'medium',
+    description: 'Qwen2.5-Coder 7B — privacy-sensitive code, offline fallback'
   }
 };
 
@@ -503,6 +540,153 @@ class SmartRouter {
     });
 
     return result;
+  }
+
+  /**
+   * Hybrid Pre-Filter Route — local-first classifier, cloud fallback.
+   *
+   * Flow:
+   *  0. Privacy check: neu bat ky file nao match privacy rule → force local-heavy (return ngay)
+   *  1. Goi local-classifier qua LiteLLM voi strict JSON output (1500ms timeout)
+   *  2. Neu confidence >= 0.8 AND complexity == 'trivial' → dung local-workhorse
+   *  3. Neu local fail / low confidence → fall through slmRoute (Gemini Flash dispatcher)
+   *
+   * Guard: local fail → silent fallback, KHONG bao loi len user.
+   *
+   * @param {Object} params - { prompt, task, files, project, contextSize }
+   * @returns {Promise<Object>} - Route result + routing_method field
+   */
+  async hybridRoute({ prompt = '', task = '', files = [], project = '', contextSize = 0 }) {
+    // Step 0 — Privacy pre-check (VI: kiem tra file nhay cam truoc moi thu)
+    if (Array.isArray(files) && files.length > 0) {
+      if (forceLocalForPaths(files, { projectDir: project || process.cwd() })) {
+        const match = findPrivateMatch(files, { projectDir: project || process.cwd() });
+        const result = {
+          model: 'local-heavy',
+          litellm_name: 'local-heavy',
+          score: 100,
+          reasons: [
+            'privacy',
+            `file matched rule: ${match?.file || 'n/a'} ~ ${match?.rule || 'n/a'}`
+          ],
+          description: this.models['local-heavy'].description,
+          cost: 0,
+          alternatives: [],
+          analysis: {
+            task,
+            domains: ['privacy'],
+            keywords: ['private'],
+            files_count: files.length,
+            context_size: contextSize
+          },
+          routing_method: 'privacy',
+          privacy_match: match
+        };
+        this.history.push({ timestamp: new Date().toISOString(), ...result });
+        return result;
+      }
+    }
+
+    // Step 1 — Local classifier pre-filter (1500ms budget)
+    let preFilter = null;
+    try {
+      preFilter = await this._callLocalClassifier({ prompt, task, files, project });
+    } catch {
+      preFilter = null; // silent fallback
+    }
+
+    // Step 2 — High confidence + trivial → route to local-workhorse
+    if (preFilter && preFilter.confidence >= 0.8 && preFilter.complexity === 'trivial') {
+      const selected = 'local-workhorse';
+      const result = {
+        model: selected,
+        litellm_name: this.models[selected].litellm_name,
+        score: Math.round(preFilter.confidence * 100),
+        reasons: [
+          `local-classifier: ${preFilter.intent}/${preFilter.complexity}`,
+          `confidence ${preFilter.confidence}`
+        ],
+        description: this.models[selected].description,
+        cost: 0,
+        alternatives: [],
+        analysis: {
+          task,
+          domains: [],
+          keywords: [],
+          files_count: files.length,
+          context_size: contextSize
+        },
+        routing_method: 'hybrid_local',
+        local_classification: preFilter
+      };
+      this.history.push({ timestamp: new Date().toISOString(), ...result });
+      return result;
+    }
+
+    // Step 3 — Fall through to existing slmRoute (or heuristic)
+    const cloudResult = await this.slmRoute({ task, files, prompt, project, contextSize });
+    cloudResult.routing_method = cloudResult.routing_method || 'hybrid_cloud';
+    if (preFilter) cloudResult.local_classification = preFilter;
+    return cloudResult;
+  }
+
+  /**
+   * Goi local-classifier (Qwen2.5 1.5B) qua LiteLLM. Strict JSON output.
+   * Timeout 1500ms — fail-fast, fallback se xu ly o layer tren.
+   */
+  async _callLocalClassifier({ prompt, task, files, project }) {
+    const url = (this.litellmUrl || process.env.LITELLM_URL || 'http://localhost:5002')
+      .replace(/\/+$/, '') + '/v1/chat/completions';
+    const key = this.litellmKey || process.env.LITELLM_KEY || 'sk-master-change-me';
+
+    const fileHint = (files || []).slice(0, 5).map(f =>
+      String(f).replace(/\\/g, '/').split('/').slice(-2).join('/')
+    ).join(', ');
+
+    const sys = 'You are a strict task classifier. Reply ONLY with JSON, no prose, no markdown. ' +
+      'Schema: {"intent":"build|fix|review|docs|rename|format|explain|other",' +
+      '"complexity":"trivial|medium|complex",' +
+      '"confidence":0.0-1.0}';
+    const user = `Task: ${task || 'n/a'}\nProject: ${project || 'n/a'}\nFiles: ${fileHint || 'none'}\n` +
+      `Request: ${(prompt || '').slice(0, 400)}`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'local-classifier',
+          messages: [
+            { role: 'system', content: sys },
+            { role: 'user', content: user }
+          ],
+          temperature: 0.1,
+          max_tokens: 80
+        }),
+        signal: controller.signal
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      const cleaned = content.trim().replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
+      const parsed = JSON.parse(cleaned);
+
+      const validIntent = ['build', 'fix', 'review', 'docs', 'rename', 'format', 'explain', 'other'];
+      const validComplexity = ['trivial', 'medium', 'complex'];
+
+      return {
+        intent: validIntent.includes(parsed.intent) ? parsed.intent : 'other',
+        complexity: validComplexity.includes(parsed.complexity) ? parsed.complexity : 'medium',
+        confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0))
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // Lay lich su routing
