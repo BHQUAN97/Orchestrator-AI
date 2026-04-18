@@ -953,13 +953,113 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
   test('StuckDetector detects toggle pattern', () => {
     const { StuckDetector } = require('../lib/stuck-detector');
     const d = new StuckDetector();
-    // A,B,A,B,A — 5 calls alternating
+    // A,B,A,B,A — 5 calls alternating (dung read_file khac path khong trigger redundant vi
+    // chua co search_files tren path do)
     d.record('read_file', { path: 'a.ts' });
     d.record('read_file', { path: 'b.ts' });
     d.record('read_file', { path: 'a.ts' });
     d.record('read_file', { path: 'b.ts' });
     const stuck = d.record('read_file', { path: 'a.ts' });
     assert(stuck && stuck.type === 'toggle', `expected toggle, got ${stuck?.type}`);
+  });
+
+  test('StuckDetector detects redundant read after search', () => {
+    const { StuckDetector } = require('../lib/stuck-detector');
+    const d = new StuckDetector();
+    // Step 1: search_files voi matches → track path
+    d.record('search_files', { pattern: 'async', path: 'lib/agent-loop.js' });
+    d.recordResult('search_files', { pattern: 'async', path: 'lib/agent-loop.js' }, {
+      content: JSON.stringify({ success: true, matches: [{ file: 'lib/agent-loop.js', line: 1 }] })
+    });
+    // Step 2: agent read_file cung path → must warn redundant
+    const stuck = d.record('read_file', { path: 'lib/agent-loop.js' });
+    assert(stuck && stuck.type === 'redundant_read_after_search',
+      `expected redundant_read_after_search, got ${stuck?.type}`);
+    assert(/trust the search output/i.test(stuck.message), 'message should advise trusting search');
+  });
+
+  test('StuckDetector skips warn when search returned no matches', () => {
+    const { StuckDetector } = require('../lib/stuck-detector');
+    const d = new StuckDetector();
+    d.record('search_files', { pattern: 'xyz', path: 'file.ts' });
+    d.recordResult('search_files', { pattern: 'xyz', path: 'file.ts' }, {
+      content: JSON.stringify({ success: true, matches: [] })
+    });
+    // Empty matches → agent can doc file → KHONG warn
+    const stuck = d.record('read_file', { path: 'file.ts' });
+    assert(stuck === null, `should not warn when search had no matches, got ${stuck?.type}`);
+  });
+
+  test('StuckDetector warns only once per path', () => {
+    const { StuckDetector } = require('../lib/stuck-detector');
+    const d = new StuckDetector();
+    d.record('search_files', { pattern: 'x', path: 'a.ts' });
+    d.recordResult('search_files', { pattern: 'x', path: 'a.ts' }, {
+      content: JSON.stringify({ success: true, matches: [{ file: 'a.ts' }] })
+    });
+    const first = d.record('read_file', { path: 'a.ts' });
+    assert(first && first.type === 'redundant_read_after_search');
+    const second = d.record('read_file', { path: 'a.ts' });
+    assert(second === null || second.type !== 'redundant_read_after_search',
+      `should not re-warn same path, got ${second?.type}`);
+  });
+
+  // --- Tool result cache ---
+  test('AgentLoop caches read-safe tool results', async () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({
+      model: 'test', projectDir: process.cwd(),
+      hooks: false, memory: false, hermes: false
+    });
+    // Reset state
+    agent.toolResultCache.clear();
+    agent.iteration = 1;
+
+    // Fake 1 tool call + response → luu cache
+    const tc = {
+      id: 't1',
+      function: { name: 'read_file', arguments: JSON.stringify({ path: 'x.js' }) }
+    };
+    // Mock executor.execute
+    agent.executor.execute = async () => ({
+      tool_call_id: 't1',
+      role: 'tool',
+      content: JSON.stringify({ success: true, content: 'fake file content' })
+    });
+    agent.hookRunner.run = async () => ({ blocked: false });
+
+    const r1 = await agent._executeSingleToolCall(tc);
+    assert(agent.toolResultCache.size === 1, 'cache should have 1 entry');
+    assert(agent.toolCacheStats.misses === 1, 'miss count = 1');
+
+    // Lan 2 cung args → hit cache
+    const tc2 = {
+      id: 't2',
+      function: { name: 'read_file', arguments: JSON.stringify({ path: 'x.js' }) }
+    };
+    const r2 = await agent._executeSingleToolCall(tc2);
+    assert(agent.toolCacheStats.hits === 1, `hits should be 1, got ${agent.toolCacheStats.hits}`);
+    assert(r2.content.includes('[cached'), 'returned content should be marked cached');
+  });
+
+  test('AgentLoop does NOT cache write/execute tools', async () => {
+    const { AgentLoop } = require('../lib/agent-loop');
+    const agent = new AgentLoop({
+      model: 'test', projectDir: process.cwd(),
+      hooks: false, memory: false, hermes: false
+    });
+    const tc = {
+      id: 'w1',
+      function: { name: 'write_file', arguments: JSON.stringify({ path: 'a.js', content: 'x' }) }
+    };
+    agent.executor.execute = async () => ({
+      tool_call_id: 'w1',
+      role: 'tool',
+      content: JSON.stringify({ success: true })
+    });
+    agent.hookRunner.run = async () => ({ blocked: false });
+    await agent._executeSingleToolCall(tc);
+    assert(agent.toolResultCache.size === 0, 'write_file should NOT be cached');
   });
 
   // --- Background bash ---

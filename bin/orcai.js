@@ -371,12 +371,14 @@ async function buildSystemPrompt(projectDir, role, opts = {}) {
 
 TOOLS: ${getToolsSummary()}
 
-Nguyen tac:
-- Doc file truoc khi sua (read_file, list_files, glob, search_files)
-- Dung edit_file cho sua nho, write_file cho file moi/ghi de
-- Verify bang execute_command (test, build, lint)
-- Goi task_complete voi summary ngan khi xong
-- Comment business logic tieng Viet, technical tieng Anh${claudeMdBlock}${mcpHint}`;
+Nguyen tac hieu qua (QUAN TRONG — tiet kiem token):
+- TRUST TOOL OUTPUT: neu search_files / glob / grep tra ve so ket qua, TIN ket qua do. KHONG read_file de "double-check" — moi read_file ton 2-10K token.
+- Uu tien search_files hoac glob truoc read_file cho task dem/tim. read_file chi khi thuc su can hieu code.
+- KHONG goi cung tool voi cung args 2 lan. Neu ket qua chua ro, chuyen cach tiep can khac.
+- Sua file: edit_file cho patch nho, write_file cho file moi/ghi de.
+- Verify bang execute_command (test, build, lint).
+- Goi task_complete voi summary ngan khi xong.
+- Comment business logic tieng Viet, technical tieng Anh.${claudeMdBlock}${mcpHint}`;
   }
 
   // Quét project structure — uu tien RepoCache (1hr TTL, invalidate theo git HEAD + package.json)
@@ -416,6 +418,12 @@ NGUYÊN TẮC:
 10. Truoc task moi → memory_recall(query) de xem kinh nghiem cu co lien quan
 11. Phat hien bug/bay quan trong → memory_save(type: "gotcha", ...) de nho cho lan sau
 12. Task doc lap CO THE lam song song → spawn_team (max 5 agent parallel) thay vi tung spawn_subagent
+
+HIEU QUA TOKEN (QUAN TRONG):
+- TRUST TOOL OUTPUT: neu search_files / glob tra ve so ket qua (count/list), TIN ket qua. KHONG read_file de "double-check" — moi read_file ton 2-10K token.
+- Task dem/tim: uu tien search_files > read_file. read_file chi khi can hieu logic code.
+- KHONG goi cung read_file voi cung path 2 lan — tool result da co trong history, reuse thay vi re-read.
+- Neu task co the tra loi bang 1 tool call, tra loi luon — khong read them de "verify".
 
 QUY TRÌNH:
 1. memory_recall(prompt) — xem kinh nghiem cu neu co
