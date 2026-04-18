@@ -139,8 +139,8 @@ function getBgManager() {
 // === Tool handlers ===
 async function bgList() {
   const mgr = getBgManager();
-  const procs = mgr.list();
-  return { success: true, total: procs.length, procs };
+  const processes = mgr.list();
+  return { success: true, total: processes.length, processes };
 }
 
 async function bgOutput(args) {

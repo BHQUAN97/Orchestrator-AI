@@ -1070,8 +1070,8 @@ async function interactiveMode(projectDir, opts) {
     if (input === '/bg') {
       const { bgList } = require('../tools/background-bash');
       const res = await bgList();
-      if (res.procs.length === 0) { console.log(chalk.gray('  No background processes.')); continue; }
-      for (const p of res.procs) {
+      if (res.processes.length === 0) { console.log(chalk.gray('  No background processes.')); continue; }
+      for (const p of res.processes) {
         const status = p.running ? chalk.green('running') : chalk.gray(`exit ${p.exitCode}`);
         console.log(chalk.gray(`  ${p.pid.toString().padStart(6)} [${status}] ${p.cmd}`));
       }
