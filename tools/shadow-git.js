@@ -25,7 +25,7 @@
  *   - Ghi log ra file de dev co the xem lai
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -379,7 +379,7 @@ class ShadowGit {
 
       for (const f of targets) {
         try {
-          this._exec(`git checkout ${snapshotId} -- "${f}"`);
+          this._execArgs(['checkout', snapshotId, '--', f]);
         } catch {
           // File co the la 'deleted' trong snapshot → xoa tu working dir
           const full = path.join(this.projectDir, f);
@@ -420,10 +420,10 @@ class ShadowGit {
 
     try {
       // Lay danh sach files va status
-      const nameStatusCmd = target
-        ? `git diff --name-status ${snapshotId} ${target}`
-        : `git diff --name-status ${snapshotId}`;
-      const nameStatus = this._exec(nameStatusCmd).trim();
+      const nameStatusArgs = target
+        ? ['diff', '--name-status', snapshotId, target]
+        : ['diff', '--name-status', snapshotId];
+      const nameStatus = this._execArgs(nameStatusArgs).trim();
       if (!nameStatus) return [];
 
       const results = [];
@@ -435,10 +435,10 @@ class ShadowGit {
         // Lay hunks cho file nay
         let hunks = [];
         try {
-          const diffCmd = target
-            ? `git diff --unified=3 ${snapshotId} ${target} -- "${filePath}"`
-            : `git diff --unified=3 ${snapshotId} -- "${filePath}"`;
-          const diffOut = this._exec(diffCmd);
+          const diffArgs = target
+            ? ['diff', '--unified=3', snapshotId, target, '--', filePath]
+            : ['diff', '--unified=3', snapshotId, '--', filePath];
+          const diffOut = this._execArgs(diffArgs);
           hunks = this._parseHunks(diffOut);
         } catch { /* ignore */ }
 
@@ -484,6 +484,17 @@ class ShadowGit {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 10000  // 10s timeout cho git commands
+    });
+  }
+
+  // Safer variant: execFileSync voi argv array — dung khi co input tu file path
+  // hoac data ngoai (name-status output), tranh shell injection
+  _execArgs(args) {
+    return execFileSync('git', args, {
+      cwd: this.projectDir,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10000
     });
   }
 

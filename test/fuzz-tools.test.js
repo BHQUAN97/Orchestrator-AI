@@ -771,7 +771,8 @@ test('fuzz embed_stats — fresh store (no index)', async () => {
   const store = EMBED.createEmbeddingStore({ projectDir: PROJECT_DIR, endpoint: 'http://localhost:9999', apiKey: 'test' });
   let r;
   try {
-    r = await EMBED.embedStats({ embeddingStore: store });
+    // Signature dung: (args, ctx) — store trong ctx, KHONG trong args
+    r = await EMBED.embedStats({}, { embeddingStore: store });
     assertShape(r, 'embed_stats:fresh');
     assert.equal(r.success, true, 'stats on fresh store should succeed');
   } catch (err) {
@@ -784,7 +785,8 @@ test('fuzz embed_clear — fresh store', async () => {
   const store = EMBED.createEmbeddingStore({ projectDir: PROJECT_DIR, endpoint: 'http://localhost:9999', apiKey: 'test' });
   let r;
   try {
-    r = await EMBED.embedClear({ embeddingStore: store });
+    // Signature dung: (args, ctx) + can confirm:true vi embedClear co safety guard
+    r = await EMBED.embedClear({ confirm: true }, { embeddingStore: store });
     assertShape(r, 'embed_clear:fresh');
     assert.equal(r.success, true, 'clear on fresh store should succeed');
   } catch (err) {

@@ -154,10 +154,10 @@ class ToolExecutor {
       }),
       'task_complete':   (args) => this._handleTaskComplete(args),
       // AST refactor tools
-      'ast_parse':         (args) => AST.astParse ? AST.astParse(args) : { success: false, error: 'ast-parse module not loaded' },
-      'ast_find_symbol':   (args) => AST.astFindSymbol ? AST.astFindSymbol(args) : { success: false, error: 'ast-parse not loaded' },
-      'ast_find_usages':   (args) => AST.astFindUsages ? AST.astFindUsages(args) : { success: false, error: 'ast-parse not loaded' },
-      'ast_rename_symbol': (args) => AST.astRenameSymbol ? AST.astRenameSymbol(args) : { success: false, error: 'ast-parse not loaded' },
+      'ast_parse':         (args) => AST.astParse ? AST.astParse(args, this.projectDir) : { success: false, error: 'ast-parse module not loaded' },
+      'ast_find_symbol':   (args) => AST.astFindSymbol ? AST.astFindSymbol(args, this.projectDir) : { success: false, error: 'ast-parse not loaded' },
+      'ast_find_usages':   (args) => AST.astFindUsages ? AST.astFindUsages(args, this.projectDir) : { success: false, error: 'ast-parse not loaded' },
+      'ast_rename_symbol': (args) => AST.astRenameSymbol ? AST.astRenameSymbol(args, this.projectDir) : { success: false, error: 'ast-parse not loaded' },
       // Git structured ops
       'git_advanced':      (args) => GIT_ADV ? GIT_ADV.gitAdvanced({ ...args, cwd: args.cwd || this.projectDir }) : { success: false, error: 'git-advanced not loaded' },
       // Embedding semantic search (lazy init store)

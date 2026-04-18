@@ -38,6 +38,21 @@ const BABEL_MISSING_ERR = {
 
 const SUPPORTED_EXT = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
 
+// Resolve filePath an toan trong project boundary — tranh LLM doc/ghi file ngoai project
+// Tra ve { ok, absPath, error } — neu ok=false thi absPath=null, dung tai goi
+function _resolveInProject(filePath, projectDir) {
+  if (!projectDir) {
+    // Backward compat: neu khong truyen projectDir, resolve theo cwd (caller tu chiu)
+    return { ok: true, absPath: path.resolve(filePath) };
+  }
+  const projNorm = path.normalize(projectDir);
+  const absPath = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(projNorm, filePath);
+  if (!absPath.startsWith(projNorm + path.sep) && absPath !== projNorm) {
+    return { ok: false, absPath: null, error: `BLOCKED: path outside project: ${absPath}` };
+  }
+  return { ok: true, absPath };
+}
+
 // Parse options — du dung cho ca JS lan TS
 const PARSE_OPTS = {
   sourceType: 'module',
@@ -130,13 +145,15 @@ function _isTopLevel(nodePath) {
  * @param {{path: string, include_locations?: boolean}} args
  * @returns {Promise<{success: boolean, language?: string, symbols?: any[], error?: string}>}
  */
-async function astParse(args = {}) {
+async function astParse(args = {}, projectDir) {
   if (!babelAvailable) return { ...BABEL_MISSING_ERR };
 
   const { path: filePath, include_locations = true } = args;
   if (!filePath) return { success: false, error: 'Missing path' };
 
-  const absPath = path.resolve(filePath);
+  const rv = _resolveInProject(filePath, projectDir);
+  if (!rv.ok) return { success: false, error: rv.error };
+  const absPath = rv.absPath;
   const pr = _readAndParse(absPath);
   if (!pr.ok) return { success: false, error: pr.error };
 
@@ -257,14 +274,16 @@ function _isExported(p) {
  *
  * @param {{path: string, symbol_name: string}} args
  */
-async function astFindSymbol(args = {}) {
+async function astFindSymbol(args = {}, projectDir) {
   if (!babelAvailable) return { ...BABEL_MISSING_ERR };
 
   const { path: filePath, symbol_name } = args;
   if (!filePath) return { success: false, error: 'Missing path' };
   if (!symbol_name) return { success: false, error: 'Missing symbol_name' };
 
-  const absPath = path.resolve(filePath);
+  const rv = _resolveInProject(filePath, projectDir);
+  if (!rv.ok) return { success: false, error: rv.error };
+  const absPath = rv.absPath;
   const pr = _readAndParse(absPath);
   if (!pr.ok) return { success: false, error: pr.error };
 
@@ -350,7 +369,7 @@ function _isDeclarationNode(p) {
  *
  * @param {{symbol_name: string, files: string[]}} args
  */
-async function astFindUsages(args = {}) {
+async function astFindUsages(args = {}, projectDir) {
   if (!babelAvailable) return { ...BABEL_MISSING_ERR };
 
   const { symbol_name, files } = args;
@@ -368,7 +387,7 @@ async function astFindUsages(args = {}) {
   const errors = [];
 
   for (const f of targetFiles) {
-    const res = await astFindSymbol({ path: f, symbol_name });
+    const res = await astFindSymbol({ path: f, symbol_name }, projectDir);
     if (!res.success) {
       errors.push({ path: f, error: res.error });
       continue;
@@ -406,7 +425,7 @@ async function astFindUsages(args = {}) {
  *
  * @param {{path: string, old_name: string, new_name: string, dry_run?: boolean}} args
  */
-async function astRenameSymbol(args = {}) {
+async function astRenameSymbol(args = {}, projectDir) {
   if (!babelAvailable) return { ...BABEL_MISSING_ERR };
 
   const { path: filePath, old_name, new_name, dry_run = true } = args;
@@ -418,7 +437,9 @@ async function astRenameSymbol(args = {}) {
     return { success: false, error: `Invalid new_name identifier: ${new_name}` };
   }
 
-  const absPath = path.resolve(filePath);
+  const rv = _resolveInProject(filePath, projectDir);
+  if (!rv.ok) return { success: false, error: rv.error };
+  const absPath = rv.absPath;
   const pr = _readAndParse(absPath);
   if (!pr.ok) return { success: false, error: pr.error };
 

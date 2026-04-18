@@ -39,6 +39,8 @@ function findPm2() {
 }
 
 function pm2Run(pm2, args, opts = {}) {
+  // shell:true bat buoc tren Windows de spawn .cmd/.bat files.
+  // Pm2 path + args deu hardcoded trong file nay (khong co user input) → an toan.
   const useShell = process.platform === 'win32';
   return spawnSync(pm2, args, { shell: useShell, ...opts });
 }
