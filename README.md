@@ -1,4 +1,8 @@
-# AI Orchestrator v2.2
+# AI Orchestrator v2.3
+
+[![CI](https://github.com/BHQUAN97/ai-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/BHQUAN97/ai-orchestrator/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/tests-533%20passing-brightgreen)
+![tools](https://img.shields.io/badge/tools-61-blue)
 
 Multi-model AI coding agent system: **Hermes Brain** (memory, learning, self-improve) + **Orchestrator Hands** (scan, plan, route, execute).
 
@@ -98,7 +102,9 @@ All agents receive context as structured JSON:
 
 ### Claude Code Parity (v2.3)
 
-Tool suite mo rong len **46 tools** — ngang voi Claude Code + tool rieng cho Windows.
+Tool suite mo rong len **61 tools** — ngang voi Claude Code + tool rieng cho Windows.
+
+**Tool breakdown (61):** core 26 (read/write/edit/glob/grep/web/exec/bg/memory/todo/spawn_subagent...) · AST 4 (parse/find_symbol/find_usages/rename_symbol) · git_advanced 1 (8 subactions) · embedding 4 (index/search/stats/clear) · research 4 (github_code/github_issue/npm_info/deep_research) · screenshot 3 (capture_screen/window/list_monitors) · Windows-native 22 (ps_command/everything_search/clipboard/event_log/wmi_query/wsl_exec/winget/sys_info + registry x4 + tasks x6 + services x6).
 
 **MCP support (day du):**
 - stdio + SSE transport (spec 2024-11-05)
@@ -146,6 +152,46 @@ Tool suite mo rong len **46 tools** — ngang voi Claude Code + tool rieng cho W
 - Auto-concurrency dua tren `os.freemem()` + `os.cpus()` (cpu_bound / io_bound / llm_call)
 - Native `fs.watch({recursive: true})` voi 200ms debounce — opt-in qua `--watch`
 - Memory `searchAsync()` offload worker khi docs ≥ 100 (fallback inline neu worker fail)
+
+## Testing
+
+```bash
+npm test          # 164 tests (core smoke, ~10s)
+npm run test:all  # 533 tests, 16 files (full regression, ~90s)
+```
+
+CI (`.github/workflows/ci.yml`): Node 18 + 20 matrix tren Ubuntu, Windows job rieng chay `test/windows-tools.test.js`.
+
+Docs them: [docs/PLAN-MODE.md](docs/PLAN-MODE.md), [docs/HOOKS.md](docs/HOOKS.md), [docs/adr/](docs/adr/) (10 ADR).
+
+## Benchmark
+
+E2E benchmark harness: `benchmark/` (runner + verify + scorer).
+
+```bash
+# Dry run harness (khong goi LLM)
+node benchmark/runner.js --tier A --dry-run
+
+# Full run — 5 A-tier task x model (chon tu default/cheap/smart/fast/gemini)
+node benchmark/runner.js --tier A --model cheap
+
+# Matrix run — multi model
+node benchmark/runner.js --tier A --model gemini,default,cheap,smart
+
+# Report
+node benchmark/scorer.js benchmark/results/<latest>.jsonl
+```
+
+**Latest result (2026-04-18, 5 A-tier × 4 model)**:
+
+| Model | Pass | % | Avg wall | Notes |
+|---|---|---|---|---|
+| cheap (GPT-5.4-mini) | 4/5 | **80%** | 7.4s | cost-perf winner |
+| gemini (direct) | 3/5 | 60% | 53s | free quota 20/day |
+| default (DeepSeek V3.2) | 2/5 | 40% | 33s | |
+| smart (Sonnet 4.6) | 2/5 | 40% | 3.6s | harness bug hits |
+
+Chi tiet: [benchmark/results/2026-04-18-analysis.md](benchmark/results/2026-04-18-analysis.md). Plan 25 task: [docs/BENCHMARK-PLAN.md](docs/BENCHMARK-PLAN.md).
 
 ## Project Structure
 

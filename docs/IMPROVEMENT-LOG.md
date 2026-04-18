@@ -214,6 +214,40 @@ Breakdown:
 
 ---
 
+## Nhật ký 2026-04-18 — Phiên 3 (unblock + full benchmark)
+
+**User action**: Nạp $10 OpenRouter → unblock #6.
+
+**Đã làm**:
+- ✅ Bước E: Full benchmark 5 A-tier task × 4 model = 20 run
+- ✅ Scorer report: `benchmark/results/2026-04-18-full-report.md`
+- ✅ Analysis: `benchmark/results/2026-04-18-analysis.md`
+
+**Kết quả pass rate**:
+| Model | Pass | % | Avg wall |
+|---|---|---|---|
+| cheap (GPT-5.4-mini) | 4/5 | **80%** | 7.4s |
+| gemini (direct) | 3/5 | 60% | 53s |
+| default (DeepSeek V3.2) | 2/5 | 40% | 33s |
+| smart (Sonnet 4.6) | 2/5 | 40% | 3.6s* |
+
+\* smart ngắn do bug budget prompt (Finding #2 mới).
+
+**Phát hiện mới từ benchmark** (6 findings — xem analysis.md):
+1. T01 verify regex quá strict (`\b(\d+)\s*async`) — mọi model fail
+2. **BUG**: `--no-confirm` không skip budget prompt → smart runs hang
+3. Fixture T01 incomplete (search 0 match trong file có async)
+4. Gemini free tier = 20 req/day → không đủ full 25 task
+5. parseMetrics regex không khớp format output (`cost: $X.XX`)
+6. Router `fast` model không pin deployment → call 2 đổi provider
+
+**Takeaway**: `cheap` (GPT-5.4-mini) là cost-perf winner. Trước khi mở rộng B/C/D/E tier cần fix 6 bug này.
+
+→ **Bước E: DONE**. **Phát hiện #6: CLOSED** (user nạp $10).
+→ **Bug backlog**: 6 issue mới từ benchmark — ưu tiên Finding #2 (budget prompt).
+
+---
+
 ## Nguyên tắc
 
 1. **Freeze feature mới trong 1 tháng** — chỉ fix / test / cleanup / docs.
