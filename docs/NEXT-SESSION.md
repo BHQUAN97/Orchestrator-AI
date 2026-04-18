@@ -1,32 +1,45 @@
-# Next Session — Handoff 2026-04-18 → 2026-04-XX
+# Next Session — Handoff 2026-04-18 Round 3 → 2026-04-XX
 
 > Doc file nay TRUOC khi bat dau session moi voi project ai-orchestrator.
-> Session 2026-04-18 da lam: xem docs/IMPROVEMENT-LOG.md
+> Session 2026-04-18 Round 3 da lam: xem docs/IMPROVEMENT-LOG.md (entry "Round 3")
 
 ---
 
-## Trang thai repo khi dong phien
+## Trang thai repo khi dong phien (2026-04-18 Round 3 end)
 
-- **Branch**: main (clean, khong file un-committed)
-- **Latest commit**: `ff419c6 docs: session 2026-04-18 complete — 14/14 tasks done`
-- **Tag**: `benchmark-baseline-2026-04-18` (truoc cac thay doi session nay)
-- **Remote**: `origin/main` synced
-- **Tests**: `npm run test:all` = 533/533 passing
-- **CI**: GitHub Actions wired (.github/workflows/ci.yml)
+- **Branch**: main
+- **Latest commit**: `c6b3ea3 docs(bench): canonical leaderboard cross-session for model comparison`
+- **Commit count phien**: +6 (fix fuzz CRITs, fix bg_list, fix security CRIT/HIGH, test+docs, leaderboard, bench commit round 2)
+- **Remote**: synced sau khi push
+- **Tests**: `npm run test:all` = 533/533 pass, fuzz 88/90 pass (2 test bug non-tool)
+- **CI**: GitHub Actions wired
+- **Leaderboard**: `benchmark/results/BENCHMARK-LEADERBOARD.md` — canonical cross-session, 10 model da test
 
-## Blocker duy nhat con lai
+## Uu tien phien sau (theo severity)
 
-**OpenRouter credit** (phat hien #5, #6 trong IMPROVEMENT-LOG):
-- Free tier context ≈ 14K token cho model `fast` (Gemini)
-- Benchmark task thuc te can 20-50K → FAIL truoc khi complete
-- Agent loop xai 68K token cho task "dem async function" (inefficient)
+### Priority 0 — Fix 4 MEDIUM + 2 LOW security finding (tu audit 2026-04-18)
+- **MED-1** `tools/shadow-git.js:382,439,441` — file path interpolation shell. Fix: `_exec` → execFileSync argv
+- **MED-2** `tools/glob-tool.js:29` — cwd khong check project boundary. Fix: `startsWith(projectDir + sep)`
+- **MED-3** `tools/ast-parse.js:139,267,421` — absPath khong validate. Fix: them boundary check
+- **MED-4** `lib/session-continuity.js:254-258` — listener accumulation. Fix: `removeListener` in stop/teardown
+- **LOW-1/2** init-project + orcai-loop-start execSync consistency — migrate to execFileSync
 
-**3 option unblock** (chon 1):
-1. Nap $10 OpenRouter → len tier context lon hon
-2. Switch sang Google AI API direct: free 1500 req/day, 1M context, nhanh
-3. Dung Moonshot Kimi API direct: free tier Kimi K2
+### Priority 1 — Retry 4 model 429 tu Round 2
+- `free-qwen-coder`, `free-qwen-next`, `free-hermes`, `free-llama70b` — upstream rate-limit phien truoc
+- Chay `node benchmark/runner.js --tier A --model free-qwen-coder,free-qwen-next,free-hermes,free-llama70b`
+- Neu pass > 60%: append vao BENCHMARK-LEADERBOARD.md
 
-→ User phai quyet dinh 1 option truoc khi tiep tuc Buoc E.
+### Priority 2 — Token inefficiency (handoff cu chua dung)
+- Agent dung 68K input token cho task don gian. Claude Code chi can 1-2 tool call.
+- Root cause can dieu tra: `lib/context-guard.js` evict, `lib/stuck-detector.js` repeated read, `lib/agent-loop.js` cache
+- Fix: cache tool result + stricter evict + system prompt nhan manh grep truoc doc
+
+### Priority 3 — Fix 2 test bug (non-tool)
+- `test/fuzz-tools.test.js`: `embed_stats`/`embed_clear` sai signature — fix: `embedStats({}, { embeddingStore: store })`
+
+### Priority 4 — B-tier benchmark expand
+- 5 B-tier multi-file refactor task (extract helper, add flag, migrate deprecated, standardize error, update schema)
+- Can harness support multi-file fixture truoc khi viet task
 
 ---
 

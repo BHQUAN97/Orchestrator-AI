@@ -5,6 +5,57 @@
 
 ---
 
+## Phien 2026-04-18 Round 3 — Comprehensive test + security + auto-fix
+
+**Format**: 3 agent song song (Sonnet) → consolidate → fix Critical/High → re-bench.
+
+### Agent A — Benchmark 8 free model moi
+- Them qwen-coder, qwen-next, hermes-405b, nemotron-super/nano, gemma4-31b/26b, llama70b vao litellm_config.yaml
+- 4/8 pass ping (4 bi 429 upstream — retry sau)
+- 2 model usable moi: **free-nemotron-nano** (80% pass, P/P 14.5, 17s avg) va **free-nemotron-super** (80% pass, P/P 13.2, 53s avg)
+- Cost: $0.56 — report: `benchmark/results/2026-04-18-free-expanded-report.md`
+- Commit: `9469398 bench: test 8 more free OpenRouter models`
+
+### Agent B — Fuzz test 29 tools (90 case)
+- Test file moi: `test/fuzz-tools.test.js`
+- Phat hien **5 CRITICAL crash** + 1 HIGH + 2 test-bugs (khong phai tool bug)
+- 5 CRIT da fix (commit `f6f6185`): write_file empty path/null content, edit_file null old_string, search_files invalid regex, batch_edit null args
+- 1 HIGH fix (commit `18de1cd`): bg_list rename `procs` → `processes`
+
+### Agent C — Security + quality audit (98 files, 24.5K LOC)
+- Phat hien **2 CRITICAL + 3 HIGH + 4 MEDIUM + 2 LOW**
+- 2 CRIT + 2 HIGH da fix (commit `709dad1`):
+  - CRIT-1 `wsl_exec` shell bypass — them `checkBlocked()` export tu terminal-runner
+  - CRIT-2 `worktree.js` execSync string template — chuyen execFileSync argv + validate baseBranch regex
+  - HIGH-1 `wmi-query` PS injection qua properties — allowlist `/^[A-Za-z_][A-Za-z0-9_]*$/`
+  - HIGH-2 `services` filter script block escape — allowlist `[A-Za-z0-9\-_.]`
+- HIGH-3 ReDoS `searchFiles` fix-bundled trong commit `f6f6185` (reject nested quantifier)
+- 4 MEDIUM (shadow-git path interp, glob-tool cwd, ast-parse absPath, session-continuity listener leak) + 2 LOW → **pending phien sau**
+
+### Re-benchmark
+- `cheap` (GPT-5.4-mini) post-fix: **5/5 PASS 100%** (same as baseline) — no regression
+- Defensive fix khong anh huong path benchmark (input deterministic)
+
+### Deliverable
+- 4 commit fix + 1 commit test/docs + 1 commit leaderboard
+- `benchmark/results/BENCHMARK-LEADERBOARD.md` — **canonical** cross-session (10 model, methodology, reproducibility checklist)
+- `docs/AUDIT-2026-04-18.md` — security audit report
+- `docs/FUZZ-RESULTS-2026-04-18.md` — fuzz bug list
+- `test/fuzz-tools.test.js` — regression suite moi
+
+### Test state sau phien
+- 533 test:all pass (giu nguyen)
+- 88/90 fuzz pass (2 fail la test bug khong phai tool bug)
+- 9/9 bench-verify pass (fix stale T01 stdout format)
+
+### Con lai cho phien sau
+- Retry 4 model 429 (qwen-coder, qwen-next, hermes, llama70b)
+- Fix 4 MEDIUM + 2 LOW security finding tu audit
+- Fix 2 test-bug signature (embed_stats, embed_clear)
+- Token inefficiency (Priority #1 handoff cu — van chua dung)
+
+---
+
 ## Bối cảnh ban đầu (2026-04-18)
 
 **Đánh giá v2.2 so với Claude Code** xác định 6 vấn đề:
