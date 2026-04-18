@@ -1,0 +1,77 @@
+[
+  {
+    "id": "T01",
+    "tier": "A",
+    "title": "Count async functions",
+    "prompt": "Count how many async functions are in the file lib/agent-loop.js (just a number). Use read_file or grep tool, output the final count in your final message.",
+    "fixture": "repo-snapshot",
+    "max_iterations": 8,
+    "timeout_s": 60,
+    "budget_usd": 0.05,
+    "verify": {
+      "type": "stdout_match",
+      "pattern": "\\b([0-9]+)\\s*async",
+      "expected_min": 5,
+      "expected_max": 100
+    }
+  },
+  {
+    "id": "T02",
+    "tier": "A",
+    "title": "Add JSDoc to runPlanFlow",
+    "prompt": "Open lib/plan-mode.js and make sure the function runPlanFlow has a JSDoc comment above it with at least @param and @returns tags. If it already has one, leave it. Use edit_file tool.",
+    "fixture": "repo-snapshot",
+    "max_iterations": 8,
+    "timeout_s": 90,
+    "budget_usd": 0.05,
+    "verify": {
+      "type": "file_content_regex",
+      "path": "lib/plan-mode.js",
+      "pattern": "/\\*\\*[\\s\\S]{0,400}@param[\\s\\S]{0,400}@returns[\\s\\S]{0,200}\\*/\\s*(async\\s+)?function\\s+runPlanFlow"
+    }
+  },
+  {
+    "id": "T03",
+    "tier": "A",
+    "title": "Rename variable in test file",
+    "prompt": "In the file test/parity.test.js, rename every occurrence of the local variable `passed` to `passCount` (do NOT rename anywhere else). Use edit_files or ast_rename_symbol if available. Make sure the script still runs without syntax error.",
+    "fixture": "repo-snapshot",
+    "max_iterations": 10,
+    "timeout_s": 120,
+    "budget_usd": 0.08,
+    "verify": {
+      "type": "file_content_regex",
+      "path": "test/parity.test.js",
+      "pattern": "passCount\\+\\+",
+      "must_not_pattern": "^\\s*let\\s+passed\\s*="
+    }
+  },
+  {
+    "id": "T04",
+    "tier": "A",
+    "title": "Find typo in README",
+    "prompt": "Read README.md and find one word that looks like a Vietnamese typo (e.g. missing diacritic in a common word). Output the typo and the corrected version in the final message, one line: `TYPO: <word> -> <correct>`.",
+    "fixture": "repo-snapshot",
+    "max_iterations": 5,
+    "timeout_s": 60,
+    "budget_usd": 0.05,
+    "verify": {
+      "type": "stdout_match",
+      "pattern": "TYPO:\\s*\\S+\\s*->\\s*\\S+"
+    }
+  },
+  {
+    "id": "T05",
+    "tier": "A",
+    "title": "List tools registered in definitions",
+    "prompt": "Read tools/definitions.js and list all tool names registered in the TOOLS array. Output one tool name per line in your final message.",
+    "fixture": "repo-snapshot",
+    "max_iterations": 6,
+    "timeout_s": 60,
+    "budget_usd": 0.05,
+    "verify": {
+      "type": "stdout_match",
+      "pattern": "read_file[\\s\\S]*write_file[\\s\\S]*execute_command"
+    }
+  }
+]
