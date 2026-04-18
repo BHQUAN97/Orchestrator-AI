@@ -36,6 +36,26 @@ const { OrchestratorAgent, AGENT_ROLE_MAP } = require('../router/orchestrator-ag
 const { OrchestratorV3 } = require('../lib/orchestrator-v3');
 const { SmartRouter, MODEL_PROFILES } = require('../router/smart-router');
 
+// Tich hop v2.4: audit-log, trace-api, cost-tracker, shadow-git-api
+// Lazy require de tranh crash neu optional module chua co — wrap try/catch khi goi
+let _auditLog = null;
+function getAuditLog() {
+  if (!_auditLog) {
+    const { AuditLog } = require('../router/audit-log');
+    _auditLog = new AuditLog({ projectDir: process.cwd() });
+  }
+  return _auditLog;
+}
+const traceApi = (() => {
+  try { return require('../lib/trace-api'); } catch { return null; }
+})();
+const shadowGitApi = (() => {
+  try { return require('../lib/shadow-git-api'); } catch { return null; }
+})();
+const costTrackerMod = (() => {
+  try { return require('../lib/cost-tracker'); } catch { return null; }
+})();
+
 // === Environment validation ===
 const PORT = process.env.PORT || 5003;
 const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:5002';
@@ -218,6 +238,11 @@ const server = http.createServer(async (req, res) => {
       return json(res, orchestrator.getBudgetStatus());
     }
 
+    if (url.pathname === '/api/improve-loop/status') {
+      try { const { getStatus } = require('../lib/improve-loop-status'); return json(res, { ok: true, data: getStatus({ projectDir: process.cwd() }) }); }
+      catch (e) { return json(res, { ok: false, error: e.message }); }
+    }
+
     if (url.pathname === '/api/stats') {
       return json(res, orchestrator.getStats());
     }
@@ -328,6 +353,106 @@ const server = http.createServer(async (req, res) => {
       });
       return; // KHONG kept request open — SSE handles itself
     }
+
+    // === v2.4: Audit log ===
+    if (url.pathname === '/api/audit/query') {
+      try {
+        const q = {
+          event: url.searchParams.get('event') || undefined,
+          actor: url.searchParams.get('actor') || undefined,
+          scope: url.searchParams.get('scope') || undefined,
+          since: url.searchParams.get('since') || undefined,
+          until: url.searchParams.get('until') || undefined,
+          limit: parseInt(url.searchParams.get('limit') || '100'),
+        };
+        return json(res, { ok: true, data: getAuditLog().query(q) });
+      } catch (e) { return error(res, 500, e.message); }
+    }
+    if (url.pathname === '/api/audit/tail') {
+      const n = parseInt(url.searchParams.get('n') || '50');
+      try { return json(res, { ok: true, data: getAuditLog().tail(n) }); }
+      catch (e) { return error(res, 500, e.message); }
+    }
+    if (url.pathname === '/api/audit/stats') {
+      try { return json(res, { ok: true, data: getAuditLog().stats() }); }
+      catch (e) { return error(res, 500, e.message); }
+    }
+
+    // === v2.4: Trace store v2 (persisted, replayable) ===
+    if (url.pathname === '/api/v2/traces') {
+      if (!traceApi) return error(res, 500, 'trace-api not available');
+      const q = {
+        since: url.searchParams.get('since') || undefined,
+        until: url.searchParams.get('until') || undefined,
+        status: url.searchParams.get('status') || undefined,
+        limit: parseInt(url.searchParams.get('limit') || '50'),
+        projectDir: process.cwd(),
+      };
+      return json(res, await traceApi.listTraces(q));
+    }
+    if (url.pathname.startsWith('/api/v2/trace/')) {
+      if (!traceApi) return error(res, 500, 'trace-api not available');
+      const id = url.pathname.split('/api/v2/trace/')[1];
+      if (!id) return error(res, 400, 'Missing trace ID');
+      return json(res, await traceApi.getTrace(id, { projectDir: process.cwd() }));
+    }
+
+    // === v2.4: Cost tracker ===
+    if (url.pathname === '/api/cost') {
+      if (!costTrackerMod) return error(res, 500, 'cost-tracker not available');
+      try {
+        const t = costTrackerMod.getCostTracker(process.cwd());
+        const today = new Date().toISOString().slice(0, 10);
+        return json(res, {
+          ok: true,
+          data: {
+            dailyTotalUSD: t.getDailyTotal(today),
+            topTasks: t.getTopTasks(10),
+            config: t.config || null,
+          },
+        });
+      } catch (e) { return error(res, 500, e.message); }
+    }
+    if (url.pathname === '/api/cost/stream') {
+      if (!costTrackerMod) return error(res, 500, 'cost-tracker not available');
+      const t = costTrackerMod.getCostTracker(process.cwd());
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+      const onSpend = (ev) => { try { res.write(`data: ${JSON.stringify({ type: 'spend', ...ev })}\n\n`); } catch {} };
+      const onWarn = (ev) => { try { res.write(`data: ${JSON.stringify({ type: 'warn', ...ev })}\n\n`); } catch {} };
+      const onExceed = (ev) => { try { res.write(`data: ${JSON.stringify({ type: 'exceed', ...ev })}\n\n`); } catch {} };
+      t.on('spend', onSpend);
+      t.on('cap-warning', onWarn);
+      t.on('cap-exceeded', onExceed);
+      const ping = setInterval(() => { try { res.write(`: heartbeat ${Date.now()}\n\n`); } catch { clearInterval(ping); } }, 15000);
+      req.on('close', () => {
+        t.off('spend', onSpend); t.off('cap-warning', onWarn); t.off('cap-exceeded', onExceed);
+        clearInterval(ping);
+      });
+      return;
+    }
+
+    // === v2.4: Shadow-git snapshots ===
+    if (url.pathname === '/api/shadow-git/snapshots') {
+      if (!shadowGitApi) return error(res, 500, 'shadow-git-api not available');
+      const q = {
+        projectDir: process.cwd(),
+        limit: parseInt(url.searchParams.get('limit') || '50'),
+        since: url.searchParams.get('since') || undefined,
+      };
+      return json(res, await shadowGitApi.listSnapshots(q));
+    }
+    if (url.pathname.startsWith('/api/shadow-git/snapshot/') && url.pathname.endsWith('/diff')) {
+      if (!shadowGitApi) return error(res, 500, 'shadow-git-api not available');
+      const id = url.pathname.split('/api/shadow-git/snapshot/')[1].replace(/\/diff$/, '');
+      const against = url.searchParams.get('against') || 'current';
+      return json(res, await shadowGitApi.getSnapshotDiff(id, { projectDir: process.cwd(), against }));
+    }
   }
 
   // === DELETE endpoints ===
@@ -340,6 +465,13 @@ const server = http.createServer(async (req, res) => {
       info.controller.abort();
       activeRuns.delete(traceId);
       return json(res, { cancelled: true, traceId });
+    }
+    // DELETE /api/v2/trace/:id
+    if (url.pathname.startsWith('/api/v2/trace/')) {
+      if (!traceApi) return error(res, 500, 'trace-api not available');
+      const id = url.pathname.split('/api/v2/trace/')[1];
+      if (!id) return error(res, 400, 'Missing trace ID');
+      return json(res, await traceApi.deleteTrace(id, { projectDir: process.cwd() }));
     }
     // DELETE /api/templates/:name
     if (url.pathname.startsWith('/api/templates/')) {
@@ -826,6 +958,44 @@ ${visionResult.text}`;
       }
     }
 
+    // === v2.4: Trace replay / prune ===
+    if (url.pathname.match(/^\/api\/v2\/trace\/[^/]+\/replay$/)) {
+      if (!traceApi) return error(res, 500, 'trace-api not available');
+      const id = url.pathname.split('/')[4];
+      return json(res, await traceApi.replayTrace(id, {
+        projectDir: process.cwd(),
+        fromStep: body.fromStep,
+        dryRun: body.dryRun !== false,
+      }));
+    }
+    if (url.pathname === '/api/v2/traces/prune') {
+      if (!traceApi) return error(res, 500, 'trace-api not available');
+      const keep = parseInt(body.keep || '100');
+      return json(res, await traceApi.pruneTraces(keep, { projectDir: process.cwd() }));
+    }
+
+    // === v2.4: Shadow-git rollback + label ===
+    if (url.pathname === '/api/shadow-git/rollback') {
+      if (!shadowGitApi) return error(res, 500, 'shadow-git-api not available');
+      if (!body.snapshotId) return error(res, 400, 'Missing snapshotId');
+      return json(res, await shadowGitApi.rollback(body.snapshotId, {
+        projectDir: process.cwd(),
+        dryRun: body.dryRun !== false,
+        files: Array.isArray(body.files) ? body.files : undefined,
+      }));
+    }
+    if (url.pathname.match(/^\/api\/shadow-git\/snapshot\/[^/]+\/label$/)) {
+      if (!shadowGitApi) return error(res, 500, 'shadow-git-api not available');
+      const id = url.pathname.split('/')[4];
+      if (!body.label) return error(res, 400, 'Missing label');
+      return json(res, await shadowGitApi.labelSnapshot(id, body.label, { projectDir: process.cwd() }));
+    }
+    if (url.pathname === '/api/shadow-git/prune') {
+      if (!shadowGitApi) return error(res, 500, 'shadow-git-api not available');
+      const keep = parseInt(body.keep || '50');
+      return json(res, await shadowGitApi.pruneSnapshots(keep, { projectDir: process.cwd() }));
+    }
+
     // POST /api/route — Smart router: chon model phu hop
     // Dung SLM classifier neu co, fallback ve heuristic
     if (url.pathname === '/api/route') {
@@ -866,8 +1036,23 @@ ${visionResult.text}`;
       'GET /api/budget': 'Trang thai budget',
       'GET /api/stats': 'Thong ke',
       'GET /api/models': 'Danh sach models',
-      'GET /api/traces': 'Danh sach traces gan nhat',
+      'GET /api/traces': 'Danh sach traces gan nhat (in-memory)',
       'GET /api/trace/:id': 'Chi tiet 1 trace (debug pipeline)',
+      'GET /api/v2/traces': 'Persistent trace store (replayable)',
+      'GET /api/v2/trace/:id': 'Full trace JSON',
+      'POST /api/v2/trace/:id/replay': 'Replay trace (dryRun default true)',
+      'POST /api/v2/traces/prune': 'Prune traces, keep newest N',
+      'DELETE /api/v2/trace/:id': 'Delete 1 trace',
+      'GET /api/audit/query': 'Query audit log (event/actor/scope/since/until/limit)',
+      'GET /api/audit/tail?n=50': 'Last N audit entries',
+      'GET /api/audit/stats': 'Event counts',
+      'GET /api/cost': 'Daily total + top tasks + cap config',
+      'GET /api/cost/stream': 'SSE: live spend + cap-warning + cap-exceeded',
+      'GET /api/shadow-git/snapshots': 'List shadow snapshots',
+      'GET /api/shadow-git/snapshot/:id/diff?against=current': 'Diff vs current or another snapshot',
+      'POST /api/shadow-git/rollback': 'Restore files from snapshot (dryRun default true)',
+      'POST /api/shadow-git/snapshot/:id/label': 'Attach human label',
+      'POST /api/shadow-git/prune': 'Keep newest N snapshots',
       'GET /health': 'Health check'
     }
   }));

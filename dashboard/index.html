@@ -352,6 +352,7 @@
     <button class="active" onclick="showTab('overview')">Overview</button>
     <button onclick="showTab('usage')">Usage & Cost</button>
     <button onclick="showTab('models')">Models</button>
+    <button onclick="showTab('observability')">Observability</button>
     <button onclick="showTab('settings')">Settings</button>
     <button onclick="showTab('links')">Quick Links</button>
   </div>
@@ -610,6 +611,71 @@
       </div>
     </div>
 
+    <!-- === Observability Tab (v2.4) === -->
+    <div id="tab-observability" class="tab-content">
+      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <input id="orcai-api-base" placeholder="Orchestrator API (default http://localhost:5003)" style="flex:1;min-width:260px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;">
+        <input id="orcai-api-token" placeholder="Bearer token (optional)" style="flex:1;min-width:200px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;">
+        <button onclick="obsRefreshAll()" style="background:var(--accent);border:none;color:white;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;">Refresh</button>
+      </div>
+
+      <div class="grid" style="margin-bottom:16px;">
+        <div class="card">
+          <div class="card-label">Chi phi hom nay (live)</div>
+          <div class="card-value green" id="obs-cost-daily">$0.00</div>
+          <div class="card-sub">Cap: <span id="obs-cost-cap">—</span> <span id="obs-cost-status" style="margin-left:6px;"></span></div>
+        </div>
+        <div class="card" id="improve-loop-card" style="display:none;">
+          <div class="card-label">Improve Loop</div>
+          <div class="card-value" id="iloop-best">—</div>
+          <div class="card-sub">
+            iter <span id="iloop-iter">0</span> · <span id="iloop-status">—</span><br>
+            elapsed <span id="iloop-elapsed">—</span> · ETA <span id="iloop-eta">—</span><br>
+            cfg <span id="iloop-cfg" style="font-family:monospace;font-size:10px;">—</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Audit events (tong)</div>
+          <div class="card-value blue" id="obs-audit-total">0</div>
+          <div class="card-sub">Blocked: <span id="obs-audit-blocked" class="red">0</span> | Override: <span id="obs-audit-override" class="yellow">0</span></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Traces da luu</div>
+          <div class="card-value" id="obs-trace-count">0</div>
+          <div class="card-sub">Failed: <span id="obs-trace-failed">0</span></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Shadow snapshots</div>
+          <div class="card-value" id="obs-snap-count">0</div>
+          <div class="card-sub">Newest: <span id="obs-snap-newest">—</span></div>
+        </div>
+      </div>
+
+      <h3 style="margin:20px 0 10px;">Decision Lock — Audit Log</h3>
+      <div class="card" style="padding:0;">
+        <table style="width:100%;font-size:12px;">
+          <thead><tr style="background:var(--surface);"><th style="padding:8px;text-align:left;">Time</th><th style="padding:8px;text-align:left;">Event</th><th style="padding:8px;text-align:left;">Actor</th><th style="padding:8px;text-align:left;">Scope</th><th style="padding:8px;text-align:left;">Details</th></tr></thead>
+          <tbody id="obs-audit-table"><tr><td colspan="5" style="padding:12px;color:var(--text-dim);">No data</td></tr></tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:20px 0 10px;">Traces (persisted)</h3>
+      <div class="card" style="padding:0;">
+        <table style="width:100%;font-size:12px;">
+          <thead><tr style="background:var(--surface);"><th style="padding:8px;text-align:left;">ID</th><th style="padding:8px;text-align:left;">Started</th><th style="padding:8px;text-align:left;">Status</th><th style="padding:8px;text-align:left;">Cost</th><th style="padding:8px;text-align:left;">Steps</th><th style="padding:8px;text-align:left;">Action</th></tr></thead>
+          <tbody id="obs-trace-table"><tr><td colspan="6" style="padding:12px;color:var(--text-dim);">No data</td></tr></tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:20px 0 10px;">Shadow-git Snapshots</h3>
+      <div class="card" style="padding:0;">
+        <table style="width:100%;font-size:12px;">
+          <thead><tr style="background:var(--surface);"><th style="padding:8px;text-align:left;">ID</th><th style="padding:8px;text-align:left;">Created</th><th style="padding:8px;text-align:left;">Label</th><th style="padding:8px;text-align:left;">Trigger</th><th style="padding:8px;text-align:left;">Files</th><th style="padding:8px;text-align:left;">Action</th></tr></thead>
+          <tbody id="obs-snap-table"><tr><td colspan="6" style="padding:12px;color:var(--text-dim);">No data</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- === Quick Links Tab === -->
     <div id="tab-links" class="tab-content">
       <h3 style="margin-bottom:16px;">Services</h3>
@@ -802,15 +868,199 @@
       `).join('');
     }
 
+    // === Observability (v2.4) ===
+    // Orchestrator API is separate from LiteLLM. Persist base+token in localStorage.
+    function obsApiBase() {
+      const el = document.getElementById('orcai-api-base');
+      const stored = localStorage.getItem('orcai_api_base') || 'http://localhost:5003';
+      if (el && !el.value) el.value = stored;
+      return (el && el.value) || stored;
+    }
+    function obsApiToken() {
+      const el = document.getElementById('orcai-api-token');
+      const stored = localStorage.getItem('orcai_api_token') || '';
+      if (el && !el.value) el.value = stored;
+      return (el && el.value) || stored;
+    }
+    async function obsFetch(path) {
+      const base = obsApiBase();
+      localStorage.setItem('orcai_api_base', base);
+      const token = obsApiToken();
+      if (token) localStorage.setItem('orcai_api_token', token);
+      const headers = { 'Accept': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const res = await fetch(base + path, { headers });
+      if (!res.ok) throw new Error(path + ' -> HTTP ' + res.status);
+      return res.json();
+    }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function fmtTime(t) {
+      if (!t) return '—';
+      const d = new Date(typeof t === 'number' ? t : t);
+      return isNaN(d) ? String(t) : d.toLocaleString();
+    }
+
+    async function obsLoadCost() {
+      try {
+        const r = await obsFetch('/api/cost');
+        if (!r.ok) return;
+        const d = r.data || {};
+        document.getElementById('obs-cost-daily').textContent = '$' + (d.dailyTotalUSD || 0).toFixed(4);
+        const cap = d.config && d.config.dailyCapUSD;
+        document.getElementById('obs-cost-cap').textContent = cap ? '$' + cap.toFixed(2) : '—';
+        const ratio = cap ? (d.dailyTotalUSD / cap) : 0;
+        const s = document.getElementById('obs-cost-status');
+        s.textContent = cap ? Math.round(ratio * 100) + '%' : '';
+        s.style.color = ratio > 1 ? 'var(--red)' : ratio > 0.8 ? 'var(--yellow)' : 'var(--green)';
+      } catch (e) { console.log('obs-cost:', e.message); }
+    }
+
+    async function obsLoadAudit() {
+      try {
+        const [tail, stats] = await Promise.all([ obsFetch('/api/audit/tail?n=30'), obsFetch('/api/audit/stats') ]);
+        const s = stats.data || {};
+        const total = Object.values(s).reduce((a, b) => a + b, 0);
+        document.getElementById('obs-audit-total').textContent = total;
+        document.getElementById('obs-audit-blocked').textContent = s.lock_validated_blocked || 0;
+        document.getElementById('obs-audit-override').textContent = s.lock_override_warning || 0;
+        const rows = (tail.data || []).slice().reverse().map(e => {
+          const evColor = e.event === 'lock_validated_blocked' ? 'var(--red)' : e.event === 'lock_override_warning' ? 'var(--yellow)' : 'var(--text-dim)';
+          return `<tr><td style="padding:6px 8px;color:var(--text-dim);">${esc(fmtTime(e.timestamp))}</td><td style="padding:6px 8px;color:${evColor};">${esc(e.event)}</td><td style="padding:6px 8px;">${esc(e.actor || '—')}</td><td style="padding:6px 8px;">${esc(e.scope || '—')}</td><td style="padding:6px 8px;font-family:monospace;font-size:11px;">${esc(JSON.stringify(e.details || {}).slice(0, 80))}</td></tr>`;
+        }).join('');
+        document.getElementById('obs-audit-table').innerHTML = rows || '<tr><td colspan="5" style="padding:12px;color:var(--text-dim);">No audit events yet</td></tr>';
+      } catch (e) { console.log('obs-audit:', e.message); }
+    }
+
+    async function obsLoadTraces() {
+      try {
+        const r = await obsFetch('/api/v2/traces?limit=20');
+        if (!r.ok) return;
+        const traces = (r.data && r.data.traces) || [];
+        document.getElementById('obs-trace-count').textContent = traces.length;
+        const failed = traces.filter(t => t.status === 'failed' || t.status === 'aborted').length;
+        document.getElementById('obs-trace-failed').textContent = failed;
+        const rows = traces.map(t => {
+          const c = t.status === 'completed' ? 'var(--green)' : t.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+          return `<tr><td style="padding:6px 8px;font-family:monospace;font-size:11px;">${esc(t.id)}</td><td style="padding:6px 8px;color:var(--text-dim);">${esc(fmtTime(t.startedAt))}</td><td style="padding:6px 8px;color:${c};">${esc(t.status)}</td><td style="padding:6px 8px;">$${(t.totalCost || 0).toFixed(4)}</td><td style="padding:6px 8px;">${t.steps || 0}</td><td style="padding:6px 8px;"><button onclick="obsReplay('${esc(t.id)}')" style="background:var(--accent);border:none;color:white;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Replay</button></td></tr>`;
+        }).join('');
+        document.getElementById('obs-trace-table').innerHTML = rows || '<tr><td colspan="6" style="padding:12px;color:var(--text-dim);">No traces yet</td></tr>';
+      } catch (e) { console.log('obs-traces:', e.message); }
+    }
+    async function obsReplay(id) {
+      if (!confirm('Replay trace ' + id + ' (dry-run)?')) return;
+      try {
+        const base = obsApiBase(); const token = obsApiToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const res = await fetch(base + '/api/v2/trace/' + encodeURIComponent(id) + '/replay', { method: 'POST', headers, body: JSON.stringify({ dryRun: true }) });
+        const j = await res.json();
+        alert(j.ok ? 'Replay OK. Check console for result.' : 'Replay failed: ' + j.error);
+        console.log('replay result:', j);
+      } catch (e) { alert('Replay error: ' + e.message); }
+    }
+
+    async function obsLoadSnapshots() {
+      try {
+        const r = await obsFetch('/api/shadow-git/snapshots?limit=20');
+        if (!r.ok) return;
+        const snaps = (r.data && r.data.snapshots) || r.data || [];
+        document.getElementById('obs-snap-count').textContent = snaps.length;
+        document.getElementById('obs-snap-newest').textContent = snaps[0] ? fmtTime(snaps[0].createdAt) : '—';
+        const rows = snaps.map(s => {
+          return `<tr><td style="padding:6px 8px;font-family:monospace;font-size:11px;">${esc(String(s.id).slice(0, 8))}</td><td style="padding:6px 8px;color:var(--text-dim);">${esc(fmtTime(s.createdAt))}</td><td style="padding:6px 8px;">${esc(s.label || '—')}</td><td style="padding:6px 8px;color:var(--text-dim);">${esc(s.triggeredBy || '—')}</td><td style="padding:6px 8px;">${(s.filesChanged && s.filesChanged.length) || 0}</td><td style="padding:6px 8px;"><button onclick="obsRollback('${esc(s.id)}')" style="background:var(--yellow);border:none;color:black;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Rollback</button></td></tr>`;
+        }).join('');
+        document.getElementById('obs-snap-table').innerHTML = rows || '<tr><td colspan="6" style="padding:12px;color:var(--text-dim);">No snapshots</td></tr>';
+      } catch (e) { console.log('obs-snaps:', e.message); }
+    }
+    async function obsRollback(id) {
+      if (!confirm('Rollback to snapshot ' + id + '? (dry-run first)')) return;
+      try {
+        const base = obsApiBase(); const token = obsApiToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const pre = await fetch(base + '/api/shadow-git/rollback', { method: 'POST', headers, body: JSON.stringify({ snapshotId: id, dryRun: true }) });
+        const pj = await pre.json();
+        if (!pj.ok) { alert('Preview failed: ' + pj.error); return; }
+        const n = (pj.data && pj.data.plannedChanges && pj.data.plannedChanges.length) || 0;
+        if (!confirm('Will restore ' + n + ' file(s). Apply for real?')) return;
+        const res = await fetch(base + '/api/shadow-git/rollback', { method: 'POST', headers, body: JSON.stringify({ snapshotId: id, dryRun: false }) });
+        const j = await res.json();
+        alert(j.ok ? 'Rollback OK' : 'Rollback failed: ' + j.error);
+        if (j.ok) obsLoadSnapshots();
+      } catch (e) { alert('Rollback error: ' + e.message); }
+    }
+
+    function obsRefreshAll() {
+      obsLoadCost(); obsLoadAudit(); obsLoadTraces(); obsLoadSnapshots(); obsLoadImproveLoop();
+    }
+
+    function fmtMs(ms) {
+      if (!ms || ms < 0) return '—';
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + 'm';
+      const h = Math.floor(m / 60);
+      return h + 'h ' + (m % 60) + 'm';
+    }
+
+    async function obsLoadImproveLoop() {
+      try {
+        const r = await obsFetch('/api/improve-loop/status');
+        const card = document.getElementById('improve-loop-card');
+        if (!r || !r.ok || !r.data) { card.style.display = 'none'; return; }
+        const d = r.data;
+        card.style.display = '';
+        document.getElementById('iloop-best').textContent = (d.bestScore || 0).toFixed(1) + '%';
+        document.getElementById('iloop-iter').textContent = d.iteration || 0;
+        document.getElementById('iloop-status').textContent = d.status || '—';
+        document.getElementById('iloop-elapsed').textContent = fmtMs(d.elapsedMs);
+        document.getElementById('iloop-eta').textContent = fmtMs(d.etaMs);
+        const cfg = d.lastConfig || d.bestConfig;
+        document.getElementById('iloop-cfg').textContent = cfg
+          ? `${cfg.template || '?'} sim=${cfg.similarityThreshold || '?'} k=${cfg.fewShotCount || '?'} idx=${cfg.indexSize || 0}`
+          : '—';
+        const bestEl = document.getElementById('iloop-best');
+        bestEl.className = 'card-value ' + ((d.bestScore || 0) >= (d.target || 98) ? 'green' : (d.bestScore || 0) >= 80 ? 'blue' : 'yellow');
+      } catch (e) {
+        document.getElementById('improve-loop-card').style.display = 'none';
+      }
+    }
+    setInterval(obsLoadImproveLoop, 15000);
+
+    let _obsStream = null;
+    function obsStartCostStream() {
+      try {
+        if (_obsStream) _obsStream.close();
+        const base = obsApiBase();
+        _obsStream = new EventSource(base + '/api/cost/stream');
+        _obsStream.onmessage = (ev) => {
+          try {
+            const d = JSON.parse(ev.data);
+            if (d.type === 'spend' || d.type === 'warn' || d.type === 'exceed') obsLoadCost();
+            if (d.type === 'exceed') {
+              const s = document.getElementById('obs-cost-status');
+              s.textContent = 'CAP EXCEEDED'; s.style.color = 'var(--red)';
+            }
+          } catch {}
+        };
+        _obsStream.onerror = () => { if (_obsStream) { _obsStream.close(); _obsStream = null; } };
+      } catch {}
+    }
+
     // === Init ===
     fetchUsage();
     checkHermes();
     renderDailyChart();
+    obsRefreshAll();
+    obsStartCostStream();
 
     // Refresh moi 30s
     setInterval(() => {
       fetchUsage();
       checkHermes();
+      obsRefreshAll();
+      if (!_obsStream) obsStartCostStream();
     }, 30000);
   </script>
 </body>
