@@ -139,6 +139,136 @@ console.log('\nTest 2: build() full RAG path');
   });
   assert('low-sim filtered → profile-only', out5.includes('USER STACK PROFILE') && !out5.includes('RELEVANT EXAMPLES'));
 
+  // === 7. Decision Hints — file present → injected into full RAG prompt ===
+  console.log('\nTest 7: hints injected when file present (full RAG)');
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rag-hints-'));
+  const tmpHints = path.join(tmpDir, '_decision-hints.md');
+  fs.writeFileSync(tmpHints, '---\ntitle: test\n---\n## RULE A\nFoo bar baz.\n## RULE B\nBcrypt cost >= 10.\n');
+  const builder7 = new RagPromptBuilder({
+    projectDir: __dirname,
+    embeddings: makeStubEmbeddings([{ id: 'x', score: 0.9, text: 'code', metadata: {} }]),
+    contextManager: makeStubCtxMgr(STACK_MD),
+    hintsPath: tmpHints
+  });
+  const out7 = await builder7.build({
+    basePrompt: 'You are a coding agent.',
+    userMessage: 'some query',
+    modelId: 'local-heavy'
+  });
+  assert('output contains DECISION HINTS section', out7.includes('## DECISION HINTS'));
+  assert('hints body inlined', out7.includes('RULE A') && out7.includes('Bcrypt cost'));
+  assert('frontmatter stripped', !out7.includes('title: test'));
+  assert('metric rag_hints_injected incremented', builder7.getMetrics().rag_hints_injected === 1);
+  assert('hints appears BEFORE stack profile', out7.indexOf('## DECISION HINTS') < out7.indexOf('## USER STACK PROFILE'));
+
+  // === 8. Hints injected in profile-only path ===
+  console.log('\nTest 8: hints injected in profile-only path');
+  const builder8 = new RagPromptBuilder({
+    projectDir: __dirname,
+    embeddings: makeStubEmbeddings([], true), // throws
+    contextManager: makeStubCtxMgr(STACK_MD),
+    hintsPath: tmpHints
+  });
+  const out8 = await builder8.build({ basePrompt: 'x', userMessage: 'q', modelId: 'local-heavy' });
+  assert('profile-only path has hints', out8.includes('## DECISION HINTS') && out8.includes('## USER STACK PROFILE') && !out8.includes('RELEVANT EXAMPLES'));
+
+  // === 9. hintsPath=null disables injection ===
+  console.log('\nTest 9: hintsPath=null disables hints');
+  const builder9 = new RagPromptBuilder({
+    projectDir: __dirname,
+    embeddings: makeStubEmbeddings([{ id: 'x', score: 0.9, text: 'code', metadata: {} }]),
+    contextManager: makeStubCtxMgr(STACK_MD),
+    hintsPath: null
+  });
+  const out9 = await builder9.build({ basePrompt: 'x', userMessage: 'q', modelId: 'local-heavy' });
+  assert('no DECISION HINTS when disabled', !out9.includes('## DECISION HINTS'));
+  assert('metric rag_hints_injected stays 0', builder9.getMetrics().rag_hints_injected === 0);
+
+  // === 10. Missing hints file degrades silently ===
+  console.log('\nTest 10: missing hints file → silent no-op');
+  const builder10 = new RagPromptBuilder({
+    projectDir: __dirname,
+    embeddings: makeStubEmbeddings([{ id: 'x', score: 0.9, text: 'code', metadata: {} }]),
+    contextManager: makeStubCtxMgr(STACK_MD),
+    hintsPath: path.join(tmpDir, 'no-such-file.md')
+  });
+  const out10 = await builder10.build({ basePrompt: 'x', userMessage: 'q', modelId: 'local-heavy' });
+  assert('no DECISION HINTS when file missing', !out10.includes('## DECISION HINTS'));
+  assert('rest of prompt still composed', out10.includes('## USER STACK PROFILE') && out10.includes('RELEVANT EXAMPLES'));
+
+  // === 11. Cloud model still bypasses hints ===
+  console.log('\nTest 11: cloud model bypass unaffected by hints');
+  const builder11 = new RagPromptBuilder({
+    projectDir: __dirname,
+    hintsPath: tmpHints,
+    embeddings: makeStubEmbeddings([{ id: 'x', score: 0.9, text: 'code' }]),
+    contextManager: makeStubCtxMgr(STACK_MD)
+  });
+  const base11 = 'CLOUD BASE';
+  const out11 = await builder11.build({ basePrompt: base11, userMessage: 'q', modelId: 'smart' });
+  assert('cloud byte-exact even with hints configured', out11 === base11);
+
+  // === 12. Stage-based RAG: cloud model + planner role → apply RAG ===
+  console.log('\nTest 12: stage-based RAG (cloud model + thinking role)');
+  const b12 = new RagPromptBuilder({ projectDir: __dirname });
+  assert('isStageRole(planner) → true', b12.isStageRole('planner') === true);
+  assert('isStageRole(scanner) → true', b12.isStageRole('scanner') === true);
+  assert('isStageRole(reviewer) → true', b12.isStageRole('reviewer') === true);
+  assert('isStageRole(builder) → false', b12.isStageRole('builder') === false);
+  assert('isStageRole(fe-dev) → false', b12.isStageRole('fe-dev') === false);
+  assert('isStageRole(undefined) → false', b12.isStageRole(undefined) === false);
+
+  // shouldApplyRag combines both signals
+  assert('shouldApplyRag cloud+builder → false',
+    b12.shouldApplyRag({ modelId: 'smart', agentRole: 'builder' }).apply === false);
+  assert('shouldApplyRag cloud+planner → true (reason=stage)',
+    b12.shouldApplyRag({ modelId: 'smart', agentRole: 'planner' }).apply === true &&
+    b12.shouldApplyRag({ modelId: 'smart', agentRole: 'planner' }).reason === 'stage');
+  assert('shouldApplyRag local+builder → true (reason=local)',
+    b12.shouldApplyRag({ modelId: 'local-heavy', agentRole: 'builder' }).apply === true &&
+    b12.shouldApplyRag({ modelId: 'local-heavy', agentRole: 'builder' }).reason === 'local');
+
+  // build() voi cloud + planner → RAG applied, metric rag_applied_stage tang
+  const builderStage = new RagPromptBuilder({
+    projectDir: __dirname,
+    embeddings: makeStubEmbeddings([{ id: 's', score: 0.9, text: 'planFlow' }]),
+    contextManager: makeStubCtxMgr(STACK_MD)
+  });
+  const outStage = await builderStage.build({
+    basePrompt: 'Planner base',
+    userMessage: 'design auth flow',
+    modelId: 'smart',
+    agentRole: 'planner'
+  });
+  assert('cloud+planner output has RAG markers',
+    outStage.includes('USER STACK PROFILE'));
+  const mStage = builderStage.getMetrics();
+  assert('rag_applied_stage incremented', mStage.rag_applied_stage === 1);
+  assert('rag_applied_local unchanged', mStage.rag_applied_local === 0);
+  assert('rag_applied total = 1', mStage.rag_applied === 1);
+
+  // build() voi cloud + builder → bypass (skipped_cloud)
+  const builderExec = new RagPromptBuilder({
+    projectDir: __dirname,
+    embeddings: makeStubEmbeddings([{ id: 's', score: 0.9, text: 'code' }]),
+    contextManager: makeStubCtxMgr(STACK_MD)
+  });
+  const outExec = await builderExec.build({
+    basePrompt: 'Builder base',
+    userMessage: 'write code',
+    modelId: 'smart',
+    agentRole: 'builder'
+  });
+  assert('cloud+builder byte-exact (RAG skipped)', outExec === 'Builder base');
+  assert('rag_skipped_cloud incremented for execute role',
+    builderExec.getMetrics().rag_skipped_cloud === 1);
+
+  // Cleanup tmp
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+
   console.warn = origWarn;
   console.log(`\n=== Result: ${passed} passed, ${failed} failed ===`);
   process.exit(failed === 0 ? 0 : 1);
