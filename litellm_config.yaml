@@ -96,6 +96,50 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 30
 
+  # === FREE TIER models qua OpenRouter (:free suffix) ===
+  # Danh sach verify tu /v1/models endpoint 2026-04-18
+  # Rate limit: ~20 req/min per model free tier
+
+  # MiniMax M2.5 — refactor, long context (196K)
+  - model_name: "free-minimax"
+    litellm_params:
+      model: "openai/minimax/minimax-m2.5:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Qwen3 Coder — coder-optimized, 262K ctx
+  - model_name: "free-qwen"
+    litellm_params:
+      model: "openai/qwen/qwen3-coder:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # GPT OSS 120B — big OSS model, 131K ctx (prefix openrouter to disambig)
+  - model_name: "free-gpt-oss"
+    litellm_params:
+      model: "openrouter/openai/gpt-oss-120b:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # Llama 3.3 70B — general purpose, 65K ctx
+  - model_name: "free-llama"
+    litellm_params:
+      model: "openai/meta-llama/llama-3.3-70b-instruct:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # GLM 4.5 Air — balance speed/quality, 131K ctx
+  - model_name: "free-glm"
+    litellm_params:
+      model: "openai/z-ai/glm-4.5-air:free"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
   # === LOCAL MODELS (LM Studio @ localhost:1234) ===
   # Hybrid strategy: local SUPPLEMENTS cloud, khong replace.
   # Khi chay ngoai Docker: override api_base bang env LMSTUDIO_URL (vd http://localhost:1234/v1)

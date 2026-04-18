@@ -1,0 +1,1 @@
+{"ts":"2026-04-18T07:20:04.510Z","task":"T01","title":"Count async functions","tier":"A","model":"fast","exit_code":0,"correct":false,"reason":"no match for \\b([0-9]+)\\s*async","value":null,"wall_ms":7256,"iterations":null,"tokens_in":null,"tokens_out":null,"cost_usd":null,"stdout_len":1648,"stderr_len":60,"log_file":"T01-fast-1776496804495.log"}
