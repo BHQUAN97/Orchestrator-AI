@@ -187,9 +187,30 @@ Breakdown:
 
 **Tiếp theo khi user đáp ứng blocker**:
 - Bước E: Full benchmark 25 task × 4 model
-- Task #6: GitHub Actions CI
-- Task #9: Extended thinking wire
 - Fix phát hiện #5 (token efficiency)
+
+---
+
+## Nhật ký 2026-04-18 — Phiên tiếp (sau credit block)
+
+**Đã làm thêm**:
+- ✅ Task #6: CI GitHub Actions (Node 18+20 matrix + Windows job)
+- ✅ `npm run test:all` chạy 16 file = 533 test pass (trước đó `npm test` chỉ 3 file = 164 test)
+- ✅ Task #7: Plan mode audit — đã hoàn chỉnh, tạo `docs/PLAN-MODE.md`
+- ✅ Task #8: Hooks audit — đã chuẩn Claude Code format, tạo `docs/HOOKS.md`
+- ✅ Task #9: Extended thinking mở rộng Claude → 4 provider family (Claude + Gemini 2.5 + DeepSeek-R1 + o1/o3). 20 test pass. Không cần credit (verify param construction).
+
+**Commit mới**:
+- `ci: GitHub Actions + test:all` (eebf41c)
+- `feat(thinking): multi-provider + PLAN/HOOKS docs` (6cde1d4)
+
+**Total phiên 2026-04-18**: 14/14 task xong. 20 commit tới origin/main.
+
+**Còn blocker duy nhất**: OpenRouter credit cho full benchmark run (Bước E).
+**Option unblock**:
+1. Nạp $10 OpenRouter → full context window
+2. Dùng Google AI API direct (free 1500 req/day, 1M context)
+3. Dùng Moonshot Kimi API direct
 
 ---
 
