@@ -24,6 +24,9 @@
     "test:smoke": "node router/test-router.js",
     "test:unit": "node test-v2.2.js",
     "test:hardening": "node test/hardening.test.js",
+    "test:all": "node test-v2.2.js && node test/hardening.test.js && node router/test-router.js && node test/audit-log.test.js && node test/cost-tracker.test.js && node test/cross-project-memory.test.js && node test/dynamic-lock-ttl.test.js && node test/parity.test.js && node test/rag-prompt-builder.test.js && node test/session-continuity.test.js && node test/shadow-git-rollback.test.js && node test/shared-budget-pool.test.js && node test/stack-profile.test.js && node test/trace-store.test.js && node test/training-extract.test.js && node benchmark/test-verify.js",
+    "test:bench-verify": "node benchmark/test-verify.js",
+    "bench:dry": "node benchmark/runner.js --tier A --dry-run",
     "dev": "node bin/orcai.js --interactive"
   },
   "dependencies": {

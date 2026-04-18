@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run primary test suite (npm test)
+        run: npm test
+        env:
+          CI: 'true'
+
+      - name: Run extra test files (no LiteLLM required)
+        run: |
+          node test/audit-log.test.js
+          node test/cost-tracker.test.js
+          node test/cross-project-memory.test.js
+          node test/dynamic-lock-ttl.test.js
+          node test/parity.test.js
+          node test/rag-prompt-builder.test.js
+          node test/session-continuity.test.js
+          node test/shadow-git-rollback.test.js
+          node test/shared-budget-pool.test.js
+          node test/stack-profile.test.js
+          node test/trace-store.test.js
+          node test/training-extract.test.js
+
+      - name: Verify benchmark smoke tests
+        run: node benchmark/test-verify.js
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node test/windows-tools.test.js
+        shell: bash
