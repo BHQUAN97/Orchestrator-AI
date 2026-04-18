@@ -563,9 +563,10 @@ async function main() {
   const chunksDir = path.dirname(chunksOutAbs);
   if (!fs.existsSync(chunksDir)) fs.mkdirSync(chunksDir, { recursive: true });
 
+  const builtAt = new Date().toISOString();
   const indexObj = {
     version: INDEX_VERSION,
-    built_at: new Date().toISOString(),
+    built_at: builtAt,
     embedding_model: embedModelName,
     embedding_backend: embedBackend,
     embedding_dim: embeddingDim,
@@ -605,6 +606,33 @@ async function main() {
   });
   fs.renameSync(tmpChunks, chunksOutAbs);
 
+  // Sync runtime EmbeddingStore: write the same data in the format
+  // lib/embeddings.js expects, at .orcai/embeddings/<sha256(local-embed)>.json
+  // Without this step the bench/agent-loop sees an empty store and falls back
+  // to profile-only mode (silent — only visible via ragMetrics.rag_applied=0).
+  const embedStoreModel = process.env.ORCAI_EMBED_MODEL || 'local-embed';
+  const embedStoreHash = crypto.createHash('sha256').update(embedStoreModel).digest('hex');
+  const embedStoreDir = path.join(repoRoot, '.orcai', 'embeddings');
+  const embedStorePath = path.join(embedStoreDir, `${embedStoreHash}.json`);
+  if (!fs.existsSync(embedStoreDir)) fs.mkdirSync(embedStoreDir, { recursive: true });
+  const storeData = {
+    model: embedStoreModel,
+    dim: embeddingDim,
+    items: allChunks.map((c, i) => ({
+      id: c.id,
+      text: c.text,
+      vector: Array.from(vectors[i]),
+      metadata: { ...(c.metadata || {}), source_path: c.source_path, chunk_index: c.chunk_index },
+      updated: builtAt
+    })),
+    generatedAt: new Date().toISOString(),
+    sourceIndex: path.relative(repoRoot, outAbs).replace(/\\/g, '/')
+  };
+  const tmpStore = `${embedStorePath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmpStore, JSON.stringify(storeData), 'utf8');
+  fs.renameSync(tmpStore, embedStorePath);
+  const storeSize = fs.statSync(embedStorePath).size;
+
   // Report
   const totalWords = allChunks.reduce((s, c) => s + c.metadata.word_count, 0);
   const approxTokens = Math.round(totalWords / 0.75);
@@ -626,6 +654,7 @@ async function main() {
   console.log(`  chunk size / overlap: ${args.chunkSize} / ${args.chunkOverlap} words`);
   console.log(`  index file:           ${path.relative(repoRoot, outAbs).replace(/\\/g, '/')} (${formatMB(idxSize)})`);
   console.log(`  chunks file:          ${path.relative(repoRoot, chunksOutAbs).replace(/\\/g, '/')} (${formatMB(chunksSize)})`);
+  console.log(`  embed-store file:     ${path.relative(repoRoot, embedStorePath).replace(/\\/g, '/')} (${formatMB(storeSize)})`);
   console.log(`  wall time:            ${formatElapsed(wall)}`);
   if (warnings.length) {
     console.log(`  warnings:             ${warnings.length}`);
