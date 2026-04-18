@@ -10,6 +10,9 @@ const { wmiQuery } = require('./wmi-query');
 const { wslExec, listDistros } = require('./wsl-exec');
 const { wingetSearch } = require('./winget-search');
 const { sysInfo } = require('./sys-info');
+const registry = require('./registry');
+const scheduledTasks = require('./scheduled-tasks');
+const services = require('./services');
 
 // ---- OpenAI function-calling schema ----
 const WINDOWS_TOOL_DEFINITIONS = [
@@ -140,6 +143,226 @@ const WINDOWS_TOOL_DEFINITIONS = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  // === REGISTRY ===
+  {
+    type: 'function',
+    function: {
+      name: 'registry_get',
+      description: 'Doc Windows Registry value. Path dang HKLM:\\... hoac HKCU:\\... Read-only, khong can confirm.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          valueName: { type: 'string' },
+        },
+        required: ['path', 'valueName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'registry_list',
+      description: 'Liet ke subkeys va values duoi 1 registry path. Read-only.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'registry_set',
+      description: 'Ghi registry value. YEU CAU confirm=true. Chan HKLM\\SYSTEM\\CurrentControlSet\\Services, SAM, SECURITY, Policies (bypass qua env ORCAI_REGISTRY_UNSAFE=1).',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          valueName: { type: 'string' },
+          value: {},
+          type: { type: 'string', enum: ['String', 'ExpandString', 'Binary', 'DWord', 'QWord', 'MultiString'] },
+          confirm: { type: 'boolean' },
+        },
+        required: ['path', 'valueName', 'value', 'type', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'registry_delete',
+      description: 'Xoa registry value. YEU CAU confirm=true.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          valueName: { type: 'string' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['path', 'valueName', 'confirm'],
+      },
+    },
+  },
+  // === SCHEDULED TASKS ===
+  {
+    type: 'function',
+    function: {
+      name: 'tasks_list',
+      description: 'Liet ke scheduled tasks qua schtasks /query /fo csv. filter la substring ten task.',
+      parameters: {
+        type: 'object',
+        properties: { filter: { type: 'string' } },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'tasks_get',
+      description: 'Lay chi tiet 1 scheduled task theo ten.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'tasks_run',
+      description: 'Chay ngay 1 scheduled task (khong doi schedule). Khong can confirm.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'tasks_end',
+      description: 'Dung 1 scheduled task dang chay.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'tasks_create',
+      description: 'Tao scheduled task moi. YEU CAU confirm=true. schedule: ONCE|DAILY|WEEKLY|ONLOGON|ONSTART.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          command: { type: 'string' },
+          schedule: { type: 'string' },
+          startTime: { type: 'string' },
+          user: { type: 'string' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['name', 'command', 'schedule', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'tasks_delete',
+      description: 'Xoa scheduled task. YEU CAU confirm=true.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          confirm: { type: 'boolean' },
+        },
+        required: ['name', 'confirm'],
+      },
+    },
+  },
+  // === SERVICES ===
+  {
+    type: 'function',
+    function: {
+      name: 'services_list',
+      description: 'Liet ke Windows services (Get-Service). filter la substring.',
+      parameters: {
+        type: 'object',
+        properties: { filter: { type: 'string' } },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'services_get',
+      description: 'Chi tiet 1 service.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'services_start',
+      description: 'Start 1 service. YEU CAU confirm=true. Chan service he thong: winmgmt, rpcss, lsass, wininit, csrss, smss, services.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' }, confirm: { type: 'boolean' } },
+        required: ['name', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'services_stop',
+      description: 'Stop 1 service. YEU CAU confirm=true.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' }, confirm: { type: 'boolean' } },
+        required: ['name', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'services_restart',
+      description: 'Restart 1 service. YEU CAU confirm=true.',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string' }, confirm: { type: 'boolean' } },
+        required: ['name', 'confirm'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'services_set_start_type',
+      description: 'Doi start type cua service. YEU CAU confirm=true.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          type: { type: 'string', enum: ['Auto', 'Manual', 'Disabled'] },
+          confirm: { type: 'boolean' },
+        },
+        required: ['name', 'type', 'confirm'],
+      },
+    },
+  },
 ];
 
 // ---- Handlers: map ten tool -> ham thuc thi ----
@@ -158,6 +381,25 @@ const WINDOWS_HANDLERS = {
   wsl_exec: (args = {}) => wslExec(args),
   winget_search: (args = {}) => wingetSearch(args),
   sys_info: () => sysInfo(),
+  // Registry
+  registry_get: (args = {}) => registry.registryGet(args),
+  registry_list: (args = {}) => registry.registryList(args),
+  registry_set: (args = {}) => registry.registrySet(args),
+  registry_delete: (args = {}) => registry.registryDelete(args),
+  // Scheduled tasks
+  tasks_list: (args = {}) => scheduledTasks.tasksList(args),
+  tasks_get: (args = {}) => scheduledTasks.tasksGet(args),
+  tasks_run: (args = {}) => scheduledTasks.tasksRun(args),
+  tasks_end: (args = {}) => scheduledTasks.tasksEnd(args),
+  tasks_create: (args = {}) => scheduledTasks.tasksCreate(args),
+  tasks_delete: (args = {}) => scheduledTasks.tasksDelete(args),
+  // Services
+  services_list: (args = {}) => services.servicesList(args),
+  services_get: (args = {}) => services.servicesGet(args),
+  services_start: (args = {}) => services.servicesStart(args),
+  services_stop: (args = {}) => services.servicesStop(args),
+  services_restart: (args = {}) => services.servicesRestart(args),
+  services_set_start_type: (args = {}) => services.servicesSetStartType(args),
 };
 
 module.exports = {
@@ -173,6 +415,25 @@ module.exports = {
   listDistros,
   wingetSearch,
   sysInfo,
+  // Registry
+  registryGet: registry.registryGet,
+  registryList: registry.registryList,
+  registrySet: registry.registrySet,
+  registryDelete: registry.registryDelete,
+  // Scheduled tasks
+  tasksList: scheduledTasks.tasksList,
+  tasksGet: scheduledTasks.tasksGet,
+  tasksRun: scheduledTasks.tasksRun,
+  tasksEnd: scheduledTasks.tasksEnd,
+  tasksCreate: scheduledTasks.tasksCreate,
+  tasksDelete: scheduledTasks.tasksDelete,
+  // Services
+  servicesList: services.servicesList,
+  servicesGet: services.servicesGet,
+  servicesStart: services.servicesStart,
+  servicesStop: services.servicesStop,
+  servicesRestart: services.servicesRestart,
+  servicesSetStartType: services.servicesSetStartType,
   // For orcai integration
   WINDOWS_TOOL_DEFINITIONS,
   WINDOWS_HANDLERS,
