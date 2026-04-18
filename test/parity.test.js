@@ -673,6 +673,37 @@ function assert(cond, msg) { if (!cond) throw new Error(msg || 'assertion failed
     fs.unlinkSync(filePath);
   });
 
+  await test('TranscriptLogger logs content_bytes + tokens_estimate for tool results', async () => {
+    const { TranscriptLogger } = require('../lib/transcript-logger');
+    const projectDir = path.resolve(__dirname, '..');
+    const logger = new TranscriptLogger({ projectDir, sessionId: 'test-tokens-' + Date.now() });
+    const fakeBigResult = {
+      content: JSON.stringify({ success: true, data: 'x'.repeat(4000) })
+    };
+    logger.logToolResult('read_file', fakeBigResult);
+    const filePath = logger.getPath();
+    await new Promise(r => setTimeout(r, 50));
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const entry = JSON.parse(content.trim().split('\n')[0]);
+    assert(entry.type === 'tool_result');
+    assert(entry.content_bytes > 4000, `content_bytes should exceed 4000, got ${entry.content_bytes}`);
+    assert(entry.tokens_estimate > 1000, `tokens_estimate should exceed 1000, got ${entry.tokens_estimate}`);
+    assert(entry.cached === false);
+    fs.unlinkSync(filePath);
+  });
+
+  await test('TranscriptLogger marks cached=true when result starts with [cached', async () => {
+    const { TranscriptLogger } = require('../lib/transcript-logger');
+    const projectDir = path.resolve(__dirname, '..');
+    const logger = new TranscriptLogger({ projectDir, sessionId: 'test-cached-' + Date.now() });
+    logger.logToolResult('read_file', { content: '[cached from iteration 2] stuff' });
+    const filePath = logger.getPath();
+    await new Promise(r => setTimeout(r, 50));
+    const entry = JSON.parse(fs.readFileSync(filePath, 'utf-8').trim().split('\n')[0]);
+    assert(entry.cached === true, 'cached should be true');
+    fs.unlinkSync(filePath);
+  });
+
   // --- Agent todos ---
   test('AgentTodoStore upsert + list', () => {
     const { AgentTodoStore, todoWrite, todoList } = require('../tools/agent-todos');
