@@ -13,6 +13,7 @@
  */
 
 const { spawnSubagent } = require('./subagent');
+const { getSharedPool } = require('../lib/cost-tracker');
 
 /**
  * @param {{ agents: Array<{description, prompt, subagent_type?}> }} args
@@ -45,13 +46,18 @@ async function spawnTeam(args, ctx) {
 
   const startTime = Date.now();
 
+  // Shared pool truyen thang vao ctx → tat ca subagent dung CUNG 1 pool
+  // Tranh moi subagent tu goi getSharedPool rieng (tuy van cho cung instance)
+  const sharedPool = ctx.sharedPool || (ctx.skipSharedPool ? null : getSharedPool(ctx.projectDir));
+  const teamCtx = { ...ctx, sharedPool };
+
   // Chay song song voi Promise.all
   const results = await Promise.allSettled(
     agents.map((a, idx) => spawnSubagent({
       description: a.description || `Agent ${idx + 1}`,
       prompt: a.prompt,
       subagent_type: a.subagent_type || 'general-purpose'
-    }, ctx))
+    }, teamCtx))
   );
 
   const elapsed = Date.now() - startTime;
@@ -86,7 +92,8 @@ async function spawnTeam(args, ctx) {
     failed: failures.length,
     summaries,
     failures,
-    elapsed_ms: elapsed
+    elapsed_ms: elapsed,
+    ...(sharedPool ? { pool_status: sharedPool.getPoolStatus() } : {})
   };
 }
 

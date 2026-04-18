@@ -723,6 +723,12 @@ try {
   TOOLS.push(...EMBED_SCHEMAS);
 } catch { /* optional */ }
 
+// research-tools — github_code_search / github_issue_search / npm_info / deep_research
+try {
+  const { TOOL_SCHEMAS: RESEARCH_SCHEMAS } = require('./research-tools');
+  TOOLS.push(...RESEARCH_SCHEMAS);
+} catch { /* optional */ }
+
 // screenshot — Windows-only
 if (process.platform === 'win32') {
   TOOLS.push(

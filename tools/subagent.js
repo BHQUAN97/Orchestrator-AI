@@ -12,6 +12,25 @@
  */
 
 const path = require('path');
+const { getSharedPool } = require('../lib/cost-tracker');
+
+// Uoc luong cost mac dinh de reserve. Fast/cheap = it, smart = nhieu hon.
+const ESTIMATED_COST_BY_MODEL = {
+  fast: 0.03,
+  cheap: 0.03,
+  default: 0.08,
+  smart: 0.20,
+  sonnet: 0.20,
+  opus: 0.50
+};
+
+function estimateSubagentCost(profile, args) {
+  const base = ESTIMATED_COST_BY_MODEL[profile.model] ?? 0.10;
+  // Prompt dai → uoc luong cao hon (rough heuristic)
+  const promptLen = (args?.prompt || '').length;
+  const lengthMultiplier = Math.max(1, Math.min(3, promptLen / 4000));
+  return base * lengthMultiplier;
+}
 
 const SUBAGENT_PROFILES = {
   'general-purpose': {
@@ -101,6 +120,28 @@ Rules:
 
   const startTime = Date.now();
 
+  // Shared budget pool — register + reserve truoc khi spawn.
+  // Skip neu caller truyen ctx.skipSharedPool (vd test, hoac subagent root).
+  const sharedPool = ctx.sharedPool || (ctx.skipSharedPool ? null : getSharedPool(projectDir));
+  let reservationId = null;
+  const estimatedCostUSD = ctx.estimatedCostUSD ?? estimateSubagentCost(profile, { prompt });
+
+  if (sharedPool) {
+    sharedPool.registerAgent(agentId);
+    const reservation = sharedPool.reserveBudget(agentId, estimatedCostUSD, { taskId: agentId });
+    if (!reservation.granted) {
+      sharedPool.unregisterAgent(agentId);
+      return {
+        success: false,
+        error: `Shared pool refused spawn: ${reservation.reason || 'budget exhausted'}`,
+        pool_denied: true,
+        estimatedCostUSD,
+        poolStatus: sharedPool.getPoolStatus()
+      };
+    }
+    reservationId = reservation.reservationId;
+  }
+
   // Emit spawn event cho parent observe
   if (agentBus) {
     agentBus.emit('spawn', { agentId, subagent_type, description: description || '', depth: parentDepth + 1 });
@@ -122,7 +163,8 @@ Rules:
       hermesBridge: hermesBridge || null,
       agentBus: agentBus || null,
       agentId,
-      subagentDepth: parentDepth + 1
+      subagentDepth: parentDepth + 1,
+      sharedPool: sharedPool || null
     });
 
     // Child moi khi metadata de tracking
@@ -130,6 +172,17 @@ Rules:
 
     const result = await child.run(systemPrompt, prompt);
     const elapsed = Date.now() - startTime;
+
+    // Commit actual cost to shared pool
+    if (sharedPool && reservationId) {
+      const actualCostUSD = child.budget?.spentUsd ?? 0;
+      sharedPool.commitReservation(reservationId, actualCostUSD, {
+        taskId: agentId,
+        model: profile.model
+      });
+      sharedPool.unregisterAgent(agentId);
+      reservationId = null;
+    }
 
     // Emit completion
     if (agentBus) {
@@ -159,9 +212,14 @@ Rules:
       ...(result.aborted ? { aborted: true, reason: result.reason } : {})
     };
   } catch (e) {
+    // Fail → release reservation (khong commit) de tra budget cho pool
+    if (sharedPool && reservationId) {
+      sharedPool.releaseReservation(reservationId);
+      sharedPool.unregisterAgent(agentId);
+    }
     if (agentBus) agentBus.emit('error', { agentId, error: String(e.message || e) });
     return { success: false, error: `Subagent failed: ${e.message}` };
   }
 }
 
-module.exports = { spawnSubagent, SUBAGENT_PROFILES };
+module.exports = { spawnSubagent, SUBAGENT_PROFILES, estimateSubagentCost };

@@ -186,7 +186,12 @@ class ToolExecutor {
       'capture_window':    (args) => SHOT.captureWindow ? SHOT.captureWindow(args) : { success: false, error: 'screenshot module not available' },
       'list_monitors':     () => SHOT.listMonitors ? SHOT.listMonitors() : { success: false, error: 'screenshot module not available' },
       // Windows-native handlers (Phase 2)
-      ...WINDOWS_HANDLERS
+      ...WINDOWS_HANDLERS,
+      // Research tools (v2.5) — github/npm/deep_research
+      ...(() => {
+        try { return require('./research-tools').TOOL_HANDLERS || {}; }
+        catch { return {}; }
+      })(),
     };
 
     // Tracking: files đã thay đổi, commands đã chạy
