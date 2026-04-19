@@ -30,7 +30,7 @@ if [ ! -x "$QUANTIZE_BIN" ]; then
 fi
 
 if [ ! -f "$F16_GGUF" ]; then
-  python "$LLAMA_CPP_DIR/convert_hf_to_gguf.py" "$MERGED_DIR" --outfile "$F16_GGUF" --outtype f16
+  python3 "$LLAMA_CPP_DIR/convert_hf_to_gguf.py" "$MERGED_DIR" --outfile "$F16_GGUF" --outtype f16
 fi
 
 "$QUANTIZE_BIN" "$F16_GGUF" "$Q4_GGUF" Q4_K_M

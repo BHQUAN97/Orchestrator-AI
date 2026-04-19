@@ -104,13 +104,23 @@ if [ -z "$MEM" ] || [ -z "$VCPU" ] || [ "$MEM" -lt 30 ] || [ "$VCPU" -lt 4 ]; th
   exit 1
 fi
 
-# ---- Extract host + port (port 22 mapping) ----
-POD_HOST=$(echo "$DETAIL" | grep -oE '"publicIp":"[^"]*"' | head -1 | sed 's/.*":"\(.*\)"/\1/')
-POD_PORT=$(echo "$DETAIL" | grep -oE '"portMappings":\{[^}]*\}' | grep -oE '"22":[0-9]+' | grep -oE '[0-9]+$')
+# ---- Extract host + port (port 22 mapping) — retry up to 2 min ----
+POD_HOST=""; POD_PORT=""
+for hp_try in $(seq 1 12); do
+  POD_HOST=$(echo "$DETAIL" | grep -oE '"publicIp":"[^"]*"' | head -1 | sed 's/.*":"\(.*\)"/\1/')
+  POD_PORT=$(echo "$DETAIL" | grep -oE '"portMappings":\{[^}]*\}' | grep -oE '"22":[0-9]+' | grep -oE '[0-9]+$')
+  if [ -n "$POD_HOST" ] && [ -n "$POD_PORT" ]; then
+    log "  host/port ready (attempt $hp_try): $POD_HOST:$POD_PORT"
+    break
+  fi
+  log "  [$hp_try/12] host/port not in detail yet — sleep 10s"
+  sleep 10
+  DETAIL=$(curl -sS -H "Authorization: Bearer $KEY" "$API/pods/$POD_ID" 2>&1)
+done
 
 if [ -z "$POD_HOST" ] || [ -z "$POD_PORT" ]; then
-  log "ERROR: missing host/port in pod detail — TERMINATING"
-  curl -sS -X DELETE -H "Authorization: Bearer $KEY" "$API/pods/$POD_ID" >/dev/null
+  log "ERROR: host/port still missing after 2 min — KEEPING pod RUNNING for manual debug"
+  log "  pod id: $POD_ID  (DELETE manually if unwanted)"
   exit 3
 fi
 

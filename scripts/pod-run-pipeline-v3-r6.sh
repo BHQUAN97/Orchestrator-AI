@@ -5,7 +5,13 @@
 set -o pipefail
 ROOT="/workspace/orchai"
 OUT="$ROOT/.orcai/ft-output"
-LOG="$OUT/pipeline-r6.log"
+LOG="$OUT/pipeline.log"
+
+# Load persistent deps from /workspace/pypkgs (setup-pod.sh)
+if [ -f /workspace/setup-env.sh ]; then
+  # shellcheck disable=SC1091
+  . /workspace/setup-env.sh
+fi
 
 mkdir -p "$OUT"
 echo $$ > "$OUT/pipeline-r6.pid"
@@ -20,37 +26,37 @@ echo $$ > "$OUT/pipeline-r6.pid"
     echo "[warn] If this is unintended, upload R5.5 adapter first then re-run"
   fi
 
-  echo "[stage 1/3] TRAIN lora v3-r6 (Qwen 2.5 Coder 7B + 2097 pairs, seq 4096, continue from v2)"
+  echo "[stage 1/3] TRAIN lora v3-r6 (Qwen 2.5 Coder 7B, rank=$R6_LORA_RANK epochs=$R6_EPOCHS seq=$R6_MAX_SEQ_LEN fresh=$R6_FRESH_START)"
   cd "$ROOT" && python3 scripts/train-lora-qwen7b-v3-r6.py
   TRC=$?
   if [ $TRC -ne 0 ]; then
-    echo "PIPELINE_FAILED_AT=train rc=$TRC" > "$OUT/pipeline-r6.done"
+    echo "PIPELINE_FAILED_AT=train rc=$TRC" | tee "$OUT/pipeline-r6.done" > "$OUT/pipeline.done"
     exit $TRC
   fi
-  touch "$OUT/stage.train-r6.done"
+  touch "$OUT/stage.train-r6.done" "$OUT/stage.train.done"
 
   echo "===== $(date -u +%FT%TZ) ====="
   echo "[stage 2/3] MERGE adapter v3-r6"
   cd "$ROOT" && python3 scripts/merge-lora-7b-v3-r6.py
   MRC=$?
   if [ $MRC -ne 0 ]; then
-    echo "PIPELINE_FAILED_AT=merge rc=$MRC" > "$OUT/pipeline-r6.done"
+    echo "PIPELINE_FAILED_AT=merge rc=$MRC" | tee "$OUT/pipeline-r6.done" > "$OUT/pipeline.done"
     exit $MRC
   fi
-  touch "$OUT/stage.merge-r6.done"
+  touch "$OUT/stage.merge-r6.done" "$OUT/stage.merge.done"
 
   echo "===== $(date -u +%FT%TZ) ====="
-  echo "[stage 3/3] CONVERT merged-v3-r6 → GGUF Q4_K_M"
+  echo "[stage 3/3] CONVERT merged-v3-r6 to GGUF Q4_K_M"
   apt-get update -q && apt-get install -y -q cmake build-essential git >/dev/null 2>&1
   cd "$ROOT" && bash scripts/convert-to-gguf-v3-r6.sh
   CRC=$?
   if [ $CRC -ne 0 ]; then
-    echo "PIPELINE_FAILED_AT=convert rc=$CRC" > "$OUT/pipeline-r6.done"
+    echo "PIPELINE_FAILED_AT=convert rc=$CRC" | tee "$OUT/pipeline-r6.done" > "$OUT/pipeline.done"
     exit $CRC
   fi
-  touch "$OUT/stage.convert-r6.done"
+  touch "$OUT/stage.convert-r6.done" "$OUT/stage.convert.done"
 
   echo "===== $(date -u +%FT%TZ) pipeline done ====="
   ls -lh "$OUT/qwen7b-ft-v3-r6-Q4_K_M.gguf" 2>&1
-  echo "PIPELINE_OK" > "$OUT/pipeline-r6.done"
+  echo "PIPELINE_OK" | tee "$OUT/pipeline-r6.done" > "$OUT/pipeline.done"
 } >> "$LOG" 2>&1

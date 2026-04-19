@@ -51,8 +51,12 @@ refresh_pod_info() {
   if [ -z "$json" ]; then return 1; fi
   # Port via documented sed pattern
   port=$(echo "$json" | sed -n 's/.*"portMappings":{"22":\([0-9]*\).*/\1/p' | head -1)
-  # publicIp
-  host=$(echo "$json" | python3 -c "import sys,json;d=json.loads(sys.stdin.read());print(d.get('publicIp') or (d.get('runtime',{}).get('ports',[{}])[0].get('ip','')))" 2>/dev/null || echo "")
+  # publicIp — grep-based (python3 not reliable on Windows via git-bash)
+  host=$(echo "$json" | grep -oE '"publicIp":"[^"]*"' | head -1 | sed 's/.*":"\(.*\)"/\1/')
+  if [ -z "$host" ]; then
+    # fallback: runtime.ports[].ip (first entry)
+    host=$(echo "$json" | grep -oE '"ip":"[0-9.]+"' | head -1 | sed 's/.*":"\(.*\)"/\1/')
+  fi
   if [ -n "$port" ]; then
     if [ "$port" != "$POD_PORT" ]; then log "port: $POD_PORT -> $port"; fi
     POD_PORT="$port"
@@ -61,10 +65,14 @@ refresh_pod_info() {
     if [ "$host" != "$POD_HOST" ]; then log "host: $POD_HOST -> $host"; fi
     POD_HOST="$host"
   fi
-  echo "POD_ID=$POD_ID" >  "$POD_INFO"
-  echo "POD_HOST=$POD_HOST" >> "$POD_INFO"
-  echo "POD_PORT=$POD_PORT" >> "$POD_INFO"
-  [ -n "$POD_HOST" ] && [ -n "$POD_PORT" ]
+  # Only persist pod-info if we actually got both values (avoid blanking the file)
+  if [ -n "$POD_HOST" ] && [ -n "$POD_PORT" ]; then
+    echo "POD_ID=$POD_ID" >  "$POD_INFO"
+    echo "POD_HOST=$POD_HOST" >> "$POD_INFO"
+    echo "POD_PORT=$POD_PORT" >> "$POD_INFO"
+    return 0
+  fi
+  return 1
 }
 
 ssh_cmd() {

@@ -42,14 +42,14 @@ TRAINING_FILES = [
     ".orcai/training/distill.jsonl",
     ".orcai/training/distill-v2-merged.jsonl",
 ]
-LORA_RANK = 16
-LORA_ALPHA = 32
+LORA_RANK = int(os.environ.get("R6_LORA_RANK", "32"))
+LORA_ALPHA = int(os.environ.get("R6_LORA_ALPHA", str(LORA_RANK * 2)))
 LORA_DROPOUT = 0.05
-EPOCHS = 1
+EPOCHS = int(os.environ.get("R6_EPOCHS", "3"))
 BATCH_SIZE = 1
 GRAD_ACCUM = 8
-LEARNING_RATE = 1e-4
-MAX_SEQ_LEN = 4096
+LEARNING_RATE = float(os.environ.get("R6_LR", "2e-4"))
+MAX_SEQ_LEN = int(os.environ.get("R6_MAX_SEQ_LEN", "4096"))
 SEED = 42
 
 # Fallback: neu ADAPTER_V2_PATH khong ton tai, cho phep train-from-scratch qua env var
