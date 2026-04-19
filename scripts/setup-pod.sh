@@ -77,6 +77,17 @@ export TRANSFORMERS_CACHE=/workspace/hf-cache
 EOF
 chmod +x /workspace/setup-env.sh"
 
+# ---- 3.5. Strip torch+nvidia+triton from /workspace/pypkgs (let system torch win) ----
+# pip install --target pulls in a NEWER torch than the pod image's system torch
+# (2.4.1 + cu124 + torchvision 0.19.1) — and the system torchvision then breaks
+# with "operator torchvision::nms does not exist". Fix: remove our local torch
+# stack so the system one (which matches torchvision) takes precedence.
+log "Removing torch/nvidia/triton from /workspace/pypkgs (use system torch instead)"
+$SSH "rm -rf /workspace/pypkgs/torch /workspace/pypkgs/torchvision /workspace/pypkgs/torchaudio \
+              /workspace/pypkgs/torch-* /workspace/pypkgs/torchvision-* /workspace/pypkgs/torchaudio-* \
+              /workspace/pypkgs/nvidia* /workspace/pypkgs/triton /workspace/pypkgs/triton-* \
+              /workspace/pypkgs/functorch /workspace/pypkgs/torchgen 2>&1 | tail -3"
+
 # ---- 4. Verify critical imports work with the new PYTHONPATH ----
 log "Verifying imports (trl / peft / bitsandbytes)"
 VERIFY=$($SSH "source /workspace/setup-env.sh && \
