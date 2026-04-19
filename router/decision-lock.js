@@ -133,10 +133,48 @@ class DecisionLock {
   /**
    * Unlock quyết định — cần lý do
    * Chỉ Tech Lead hoặc User được gọi
+   * Validation: refuse silently (return null) neu caller bypass constraints —
+   *   match existing soft-fail style (entry-not-found cung return null).
    */
-  unlock(decisionId, { reason, unlockedBy }) {
+  unlock(decisionId, { reason, unlockedBy } = {}) {
     const entry = this.decisions.find(d => d.id === decisionId);
     if (!entry) return null;
+
+    // Guard 1: chi tech-lead/user duoc unlock — tranh agent thuong bypass lock
+    if (unlockedBy !== 'tech-lead' && unlockedBy !== 'user') {
+      console.warn(`⚠️  DecisionLock.unlock refused: unlockedBy="${unlockedBy}" not authorized (need tech-lead|user)`);
+      this._emit('lock_unlock_refused', {
+        actor: unlockedBy || 'unknown',
+        scope: entry.scope,
+        decisionId,
+        details: { reason: 'unauthorized_role', providedRole: unlockedBy || null }
+      });
+      return null;
+    }
+
+    // Guard 2: khong re-unlock entry da unlocked — tranh ghi de audit trail
+    if (entry.status !== 'active') {
+      console.warn(`⚠️  DecisionLock.unlock refused: decision ${decisionId} already ${entry.status}`);
+      this._emit('lock_unlock_refused', {
+        actor: unlockedBy,
+        scope: entry.scope,
+        decisionId,
+        details: { reason: 'already_unlocked', currentStatus: entry.status }
+      });
+      return null;
+    }
+
+    // Guard 3: reason bat buoc — audit trail can ly do
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      console.warn(`⚠️  DecisionLock.unlock refused: reason required for ${decisionId}`);
+      this._emit('lock_unlock_refused', {
+        actor: unlockedBy,
+        scope: entry.scope,
+        decisionId,
+        details: { reason: 'missing_reason' }
+      });
+      return null;
+    }
 
     entry.status = 'unlocked';
     entry.unlockedAt = new Date().toISOString();

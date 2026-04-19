@@ -18,6 +18,7 @@ const VALID_EVENTS = new Set([
   'lock_validated_allowed',
   'lock_validated_blocked',
   'lock_unlocked',
+  'lock_unlock_refused',
   'lock_expired',
   'lock_override_warning'
 ]);

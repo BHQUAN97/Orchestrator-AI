@@ -25,7 +25,10 @@ const { RagPromptBuilder } = require('../lib/rag-prompt-builder');
 const LITELLM_URL = process.env.LITELLM_URL || 'http://localhost:4001';
 const LITELLM_KEY = process.env.LITELLM_KEY || process.env.LITELLM_API_KEY || '';
 const TIMEOUT_MS = Number(process.env.BENCH_TIMEOUT_MS || 60_000);
-const BASE_SYSTEM_PROMPT = 'You are a senior engineer. Return only the code requested, no prose unless the prompt asks for it.';
+const BASE_SYSTEM_PROMPT_PLAIN = 'You are a senior engineer. Return only the code requested, no prose unless the prompt asks for it.';
+// CoT variant: explicit reasoning hint before code. Helps weak models surface edge cases.
+const BASE_SYSTEM_PROMPT_COT = 'You are a senior engineer. Before writing code, silently think through: (1) the happy path signature, (2) 2-3 edge cases, (3) error handling needed. Then return ONLY the final runnable code — no prose, no markdown fences, no explanations.';
+const BASE_SYSTEM_PROMPT = process.env.BENCH_COT === '1' ? BASE_SYSTEM_PROMPT_COT : BASE_SYSTEM_PROMPT_PLAIN;
 
 const ALL_MODELS = [
   { id: 'local-workhorse', tier: 'local',   pricePer1kIn: 0,       pricePer1kOut: 0 },
@@ -36,6 +39,9 @@ const ALL_MODELS = [
   { id: 'fast',            tier: 'fast',    pricePer1kIn: 0.00030, pricePer1kOut: 0.0025 },
   { id: 'smart',           tier: 'smart',   pricePer1kIn: 0.003,   pricePer1kOut: 0.015 },
   { id: 'architect',       tier: 'architect', pricePer1kIn: 0.015, pricePer1kOut: 0.075 },
+  // OpenRouter routed cloud models — for head-to-head bench vs local RAG tiers
+  { id: 'deepseek',        tier: 'cloud',   pricePer1kIn: 0.00027, pricePer1kOut: 0.00042 },
+  { id: 'gpt-mini',        tier: 'cloud',   pricePer1kIn: 0.00015, pricePer1kOut: 0.00060 },
 ];
 
 // ---- Default (generic) problem set — clone tu coding-quality-bench.js ----
@@ -208,6 +214,8 @@ function makeRagBuilder(projectDir, mock) {
     contextManager,
     maxExamples: Number(process.env.BENCH_RAG_MAX_EXAMPLES || 3),
     minSimilarity: Number(process.env.BENCH_RAG_MIN_SIMILARITY || 0.55),
+    // BENCH_NO_HINTS=1 → disable decision-hints injection (A/B test graph hints)
+    hintsPath: process.env.BENCH_NO_HINTS === '1' ? null : undefined,
   });
 }
 
@@ -332,11 +340,20 @@ function syntaxCheck(code, lang) {
     if (lang === 'ts') return { ok: bracesBalanced(code), reason: 'ts-soft-check' };
     if (lang === 'py') {
       fs.writeFileSync(tmp + '.py', code);
-      const candidates = ['py', 'python', 'python3'];
+      // Explicit full paths beat PATH-based lookup (Windows Store stubs shadow real Python)
+      const HOME = process.env.USERPROFILE || process.env.HOME || '';
+      const candidates = [
+        path.join(HOME, 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'python.exe'),
+        path.join(HOME, 'AppData', 'Local', 'Programs', 'Python', 'Python311', 'python.exe'),
+        'py', 'python', 'python3',
+      ];
       for (const c of candidates) {
         const r = spawnSync(c, ['-m', 'py_compile', tmp + '.py'], { encoding: 'utf8' });
         if (r.status === 0) return { ok: true };
-        if (r.status !== null) return { ok: false, reason: (r.stderr || '').slice(0, 160) };
+        // Detect Windows Store stub / missing Python → fall through to next candidate
+        const msg = (r.stderr || '') + (r.stdout || '');
+        if (r.status === null || r.status === 9009 || /python was not found|app execution alias|Microsoft Store/i.test(msg)) continue;
+        if (r.status !== null) return { ok: false, reason: msg.slice(0, 160) };
       }
       return { ok: bracesBalanced(code, 'py'), reason: 'py-soft-check' };
     }
@@ -407,6 +424,26 @@ async function runProblemForModel(problem, model, ragBuilder, useRag, mock) {
       const s2 = scoreResult(problem, p2.content);
       retry = { ...s2, latencyMs: p2.latencyMs, promptTokens: p2.promptTokens, completionTokens: p2.completionTokens };
     }
+  }
+
+  // BENCH_SAVE_CODE=1 → append raw model output to .orcai/distill-<model>.jsonl for FT data capture
+  if (process.env.BENCH_SAVE_CODE === '1') {
+    try {
+      const line = JSON.stringify({
+        model: model.id,
+        problemId: problem.id,
+        problemKey: problem.key,
+        category: problem.category,
+        difficulty: problem.difficulty,
+        lang: problem.lang,
+        prompt: problem.prompt,
+        code: p1.content || '',
+        score: s1.score,
+        breakdown: s1.breakdown,
+        ts: new Date().toISOString(),
+      });
+      fs.appendFileSync(path.join('.orcai', `distill-${model.id}.jsonl`), line + '\n');
+    } catch {}
   }
 
   return {

@@ -146,6 +146,18 @@ const MODEL_COST_PER_1K = {
 // === Budget gioi han ===
 const DAILY_BUDGET = 2.00; // $2/ngay — KHONG vuot qua
 
+// === Token accounting fallback counter ===
+// Khi API response thieu usage.*_tokens, _callModelWithRetry phai uoc luong
+// tokens = content.length / 4. Counter nay giup phat hien runaway (vi du
+// 68K-token tren task tac la "count async") bang cach:
+//  - console.warn moi lan fallback chay
+//  - luu tong so lan + tong tokens uoc luong de test/diagnostic query
+// Exported duoi module.exports de test co the reset/inspect.
+const tokenFallbackStats = {
+  missingUsageCount: 0,
+  totalFallbackTokens: 0
+};
+
 // === Orchestrator Agent v2.1 ===
 class OrchestratorAgent {
   constructor(options = {}) {
@@ -1693,9 +1705,26 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
     // Track chi phi thuc te — dung lock tranh race condition
     const usage = data.usage || {};
     const totalTokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
-    await this._withBudgetLock(() => this._trackCost(model, totalTokens || Math.round((data.choices?.[0]?.message?.content || '').length / 4), reservedCost));
+    const responseContent = data.choices?.[0]?.message?.content || '';
+    let tokensForCost = totalTokens;
+    if (!totalTokens) {
+      // Fallback: API response khong co usage — uoc luong tho theo do dai content.
+      // Estimate nay CO THE SAI lon (tung gay runaway 68K tokens tren task nho).
+      // Log warn + count de debug — xem tokenFallbackStats neu nghi runaway.
+      const contentLen = responseContent.length;
+      const estimated = Math.round(contentLen / 4);
+      tokensForCost = estimated;
+      tokenFallbackStats.missingUsageCount += 1;
+      tokenFallbackStats.totalFallbackTokens += estimated;
+      console.warn(
+        `[token-fallback] role=${this.currentAgentRole || 'unknown'} ` +
+        `model=${model} content_len=${contentLen} est_tokens=${estimated} ` +
+        `count=${tokenFallbackStats.missingUsageCount} — usage missing, fallback estimate may be wrong`
+      );
+    }
+    await this._withBudgetLock(() => this._trackCost(model, tokensForCost, reservedCost));
 
-    return data.choices?.[0]?.message?.content || '';
+    return responseContent;
   }
 
   // =============================================
@@ -1715,4 +1744,4 @@ Locked decisions hiện tại: ${this.decisionLock.getActive().length}`;
   }
 }
 
-module.exports = { OrchestratorAgent, AGENT_ROLE_MAP };
+module.exports = { OrchestratorAgent, AGENT_ROLE_MAP, tokenFallbackStats };

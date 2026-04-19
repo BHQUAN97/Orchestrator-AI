@@ -452,7 +452,8 @@ class SmartRouter {
     let classification;
     try {
       classification = await this.slmClassifier.classify({ task, files, prompt, project });
-    } catch {
+    } catch (e) {
+      console.warn(`⚠️  SmartRouter: SLM classify failed (${e.message}) — fallback to heuristic`);
       classification = null;
     }
 
@@ -591,8 +592,9 @@ class SmartRouter {
     let preFilter = null;
     try {
       preFilter = await this._callLocalClassifier({ prompt, task, files, project });
-    } catch {
-      preFilter = null; // silent fallback
+    } catch (e) {
+      console.warn(`⚠️  SmartRouter: local classifier pre-filter failed (${e.message}) — fallback to heuristic`);
+      preFilter = null;
     }
 
     // Step 2 — High confidence + trivial → route to local-workhorse

@@ -345,6 +345,73 @@ const PROBLEMS_REALISTIC = [
     badPractices: [/setInterval\(/, /cache\[id\]\s*=\s*cache\[id\]\s*\|\|/],
     sourceFile: 'common Express memory-leak pattern',
   },
+
+  // ── integration-flow problems (FashionEcom-sourced, multi-file, playbook-driven) ──
+  {
+    id: 35, key: 'integration-auth-login-full', category: 'integration-auth', difficulty: 'hard', lang: 'ts',
+    prompt:
+      "Viet NestJS 11 login flow complete: LoginDto (email+password, class-validator) + AuthController POST /auth/login + AuthService.login(dto). Service phai: (1) tim user, (2) bcrypt.compare password, (3) neu fail → tang user.failedLogins bang repository.increment() (atomic), (4) sign JWT access token (15m) + refresh token (7d) qua JwtService.signAsync, (5) log audit event qua Logger. Chi tra code TS, ban 3 file (dto/controller/service) trong 1 response. Stack: NestJS 11, TypeORM 0.3, bcrypt, @nestjs/jwt.",
+    hint: "LoginDto dung @IsEmail/@IsString/@MinLength(8). Controller chi goi service, khong logic. Service: bcrypt.compare(dto.password, user.passwordHash). Dung repo.increment({email}, 'failedLogins', 1). JwtService.signAsync({ sub: user.id }, { expiresIn: '15m' }). Logger.log(`login success: ${user.id}`).",
+    keywords: [/bcrypt\.compare/, /JwtService|signAsync/, /@Post\(['"]\/?login/, /class\s+LoginDto|@IsEmail|@IsString/, /increment\(|failedLogins/, /Logger|audit/i],
+    testMarker: /@Controller\(['"]\/?auth|class\s+AuthController/,
+    badPractices: [/:\s*any\b/, /console\.log/, /md5|sha1/],
+    sourceFile: 'FashionEcom/backend/src/modules/auth (login flow)',
+  },
+
+  {
+    id: 36, key: 'integration-refresh-rotate', category: 'integration-auth', difficulty: 'hard', lang: 'ts',
+    prompt:
+      "Viet NestJS refresh-token rotation flow: RefreshToken entity (id, userId, familyId, tokenHash, revokedAt, expiresAt) + AuthService.refresh(oldRefreshToken) phai: (1) hash + lookup token, (2) neu khong tim thay HOAC revokedAt != null → revoke CA FAMILY (tat ca token cung familyId) va throw UnauthorizedException (reuse detection), (3) neu OK → revoke token cu + issue new access + new refresh (cung familyId), (4) save. Chi tra code TS (entity + service method). Stack: NestJS 11, TypeORM 0.3, bcrypt for hash, @nestjs/jwt.",
+    hint: "Family = chain identifier cho 1 login session. Reuse-detection: stolen refresh replayed => dau vet = (token_id exists nhung revokedAt != null). Khi phat hien: UPDATE RefreshToken SET revokedAt = NOW() WHERE familyId = X. Dung bcrypt.hash(token, 10) de luu tokenHash. Entity: @Entity() class RefreshToken { @PrimaryGeneratedColumn() id; @Column() userId; @Column() familyId; @Column() tokenHash; @Column({nullable:true}) revokedAt; @Column() expiresAt; }.",
+    keywords: [/family|familyId/i, /revoke|revokedAt|invalidate/i, /UnauthorizedException|401/, /JwtService|signAsync/, /bcrypt\.(hash|compare)/, /@Entity|@Column/],
+    testMarker: /async\s+refresh\s*\(|class\s+RefreshToken\b/,
+    badPractices: [/:\s*any\b/, /console\.log/],
+    sourceFile: 'FashionEcom/backend/src/modules/auth (refresh rotation)',
+  },
+
+  {
+    id: 37, key: 'integration-upload-thumbnail', category: 'integration-media', difficulty: 'hard', lang: 'ts',
+    prompt:
+      "Viet NestJS media upload flow: MediaController POST /media/upload dung FileInterceptor('file') + MediaService.uploadAndThumbnail(file). Service phai: (1) validate size <= 5MB va mimetype start 'image/', neu fail throw BadRequestException, (2) generate 3 thumbnails (300/600/1200 px width, giu aspect ratio) qua sharp(file.buffer).resize({width}).toBuffer(), (3) save original + 3 thumbs vao /storage/YYYY/MM/<uuid>-<size>.webp qua fs.promises.writeFile, (4) return { url, thumbnails: [{size:300,url},{size:600,url},{size:1200,url}] }. Chi tra code 2 file TS (controller + service). Stack: NestJS 11, sharp, uuid.",
+    hint: "UseInterceptors(FileInterceptor('file', {limits:{fileSize: 5*1024*1024}})). sharp(buffer).resize({width, withoutEnlargement:true}).webp().toBuffer(). path = path.join('storage', yyyy, mm, `${uuid}-${size}.webp`). Promise.all 3 thumbs song song.",
+    keywords: [/FileInterceptor/, /sharp\(|\.resize\(/, /mimetype|startsWith\(['"]image/, /5\s*\*\s*1024|5242880|5\s*MB/i, /Promise\.all/, /BadRequestException/],
+    testMarker: /@Post\(['"]\/?upload|UseInterceptors\(FileInterceptor/,
+    badPractices: [/:\s*any\b/, /console\.log/],
+    sourceFile: 'FashionEcom/backend/src/modules/media (upload + sharp thumbnails)',
+  },
+
+  {
+    id: 38, key: 'integration-order-create', category: 'integration-orders', difficulty: 'hard', lang: 'ts',
+    prompt:
+      "Viet NestJS order creation flow: OrdersController POST /orders (CreateOrderDto: items[{productId, qty}], customerId) + OrdersService.create(dto). Service phai: (1) dung QueryRunner transaction, (2) cho moi item: load Product voi setLock('pessimistic_write') va check stock >= qty, neu thieu throw BadRequestException('out of stock: ' + productId), (3) decrement stock, (4) calculate subtotal + tax 10%, (5) save Order + OrderItems cung transaction, (6) commit, (7) emit audit event qua EventEmitter2 'order.created'. Chi tra code controller + service. Stack: NestJS 11, TypeORM 0.3 DataSource, @nestjs/event-emitter.",
+    hint: "queryRunner = dataSource.createQueryRunner(); await queryRunner.startTransaction(); try { ... await queryRunner.commitTransaction(); } catch { await queryRunner.rollbackTransaction(); throw; } finally { await queryRunner.release(); }. queryRunner.manager.findOne(Product, {where:{id}, lock:{mode:'pessimistic_write'}}). this.eventEmitter.emit('order.created', { orderId, customerId, total }).",
+    keywords: [/QueryRunner|createQueryRunner|startTransaction/, /pessimistic_write|setLock|lock:\s*{/, /BadRequestException|out of stock|insufficient/i, /commitTransaction|rollbackTransaction/, /eventEmitter|EventEmitter2|emit\(['"]order/, /subtotal|tax|0\.1|\*\s*10/],
+    testMarker: /@Post\(\)\s*async\s+create|class\s+OrdersController/,
+    badPractices: [/:\s*any\b/, /console\.log/],
+    sourceFile: 'FashionEcom/backend/src/modules/orders (order creation with stock lock)',
+  },
+
+  {
+    id: 39, key: 'integration-audit-interceptor', category: 'integration-logging', difficulty: 'medium', lang: 'ts',
+    prompt:
+      "Viet NestJS AuditInterceptor + redact helper: Interceptor log JSON moi request {method, url, userId, traceId, durationMs, statusCode} qua Logger, lay traceId tu header 'traceparent' (W3C format '00-<trace>-<span>-01', extract 32-char trace id). Redact fields: Authorization header, password/passwordHash/creditCard trong body → '[REDACTED]'. Chi tra code interceptor + redact helper trong 1 file.",
+    hint: "implements NestInterceptor. next.handle().pipe(tap(()=>{ const dt = Date.now() - start; this.logger.log(JSON.stringify({...})); })). traceparent format: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'. Redact: recursive replace cac key sensitive in deep clone. JSON.stringify output.",
+    keywords: [/NestInterceptor|intercept\(/, /tap\(|rxjs/, /traceparent|correlation/i, /\[REDACTED\]|redact/i, /JSON\.stringify/, /Logger|structured/],
+    testMarker: /class\s+AuditInterceptor|implements\s+NestInterceptor/,
+    badPractices: [/:\s*any\b/, /console\.log/],
+    sourceFile: 'FashionEcom/backend/src/common/interceptors (audit + structured log)',
+  },
+
+  {
+    id: 40, key: 'integration-dockerfile-full', category: 'integration-devops', difficulty: 'hard', lang: 'sh',
+    prompt:
+      "Viet Dockerfile production cho NestJS 11 backend (ai-orchestrator/FashionEcom pattern): (1) multi-stage node:20-alpine builder + runtime, (2) builder chay npm ci + npm run build, (3) runtime COPY --from=build /app/dist + prod node_modules, (4) non-root USER node, (5) HEALTHCHECK dung curl --fail http://localhost:4000/health moi 30s, start-period 10s, (6) dung tini hoac exec form CMD [\"node\",\"dist/main\"] de signal forward, (7) EXPOSE 4000. Chi tra Dockerfile noi dung.",
+    hint: "FROM node:20-alpine AS build ... RUN npm ci ... RUN npm run build. FROM node:20-alpine AS prod ... RUN apk add --no-cache curl tini. COPY --from=build /app/dist ./dist. USER node. HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD curl --fail http://localhost:4000/health || exit 1. ENTRYPOINT [\"/sbin/tini\",\"--\"]. CMD [\"node\",\"dist/main\"]. EXPOSE 4000.",
+    keywords: [/FROM\s+node.*AS\s+build/i, /HEALTHCHECK/i, /USER\s+node|USER\s+nonroot|adduser/i, /--from=build/, /CMD\s*\[/, /EXPOSE\s+4000/],
+    testMarker: /FROM\s+node:\d+-alpine/i,
+    badPractices: [/USER\s+root/i, /RUN\s+apt-get\s+upgrade/i, /ADD\s+http/i],
+    sourceFile: 'FashionEcom/backend/Dockerfile (+ deploy-vps-nginx-pm2 playbook)',
+  },
 ];
 
 function PROBLEM_SET_STATS(set) {

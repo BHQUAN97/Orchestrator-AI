@@ -498,24 +498,38 @@ class TechLeadAgent {
     const model = useArchitect ? this.architectModel : this.model;
     if (useArchitect) this.stats.architectEscalations++;
 
-    const response = await fetch(`${this.litellmUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.litellmKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent }
-        ],
-        max_tokens: useArchitect ? 8000 : 4000, // Architect can nhieu token hon
-        temperature: 0.2
-      })
-    });
+    // Timeout 90s/call — tranh fetch hang vo tan khi LiteLLM treo
+    const TIMEOUT_MS = parseInt(process.env.LITELLM_TIMEOUT_MS) || 90000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const data = await response.json();
+    let data;
+    try {
+      const response = await fetch(`${this.litellmUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.litellmKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+          ],
+          max_tokens: useArchitect ? 8000 : 4000, // Architect can nhieu token hon
+          temperature: 0.2
+        }),
+        signal: controller.signal
+      });
+      data = await response.json();
+    } catch (err) {
+      const isTimeout = err.name === 'AbortError';
+      throw new Error(`LiteLLM call failed: ${isTimeout ? `timeout >${TIMEOUT_MS}ms` : err.message}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     return data.choices?.[0]?.message?.content || '';
   }

@@ -25,6 +25,15 @@ docker-compose.override.yaml
 # Node
 node_modules/
 
+# Python
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+
+# Third-party vendored
+third_party/
+
 # IDE
 .vscode/
 .idea/
@@ -49,3 +58,4 @@ secrets/*.decrypted
 # Chi commit ban encrypted (.enc) va template (.example)
 !.env.example
 !.env.*.enc
+.runpod/

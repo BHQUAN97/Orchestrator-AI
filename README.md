@@ -6,7 +6,7 @@
 
 Multi-model AI coding agent system: **Hermes Brain** (memory, learning, self-improve) + **Orchestrator Hands** (scan, plan, route, execute).
 
-Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks to optimal models: Kimi K2.5 (frontend), DeepSeek (backend), Gemini Flash (review), Claude Sonnet (architecture). Reduces token cost by 70-95% compared to a single premium model.
+Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks to optimal models: GPT-5.4 Mini (workhorse — fe/be/debug/docs), Gemini 3 Flash (review/dispatch), Claude Opus 4.6 (architecture — opt-in). Reduces token cost by 70-95% compared to a single premium model.
 
 ## Architecture
 
@@ -17,13 +17,13 @@ User Request (CLI / API / WebUI)
      |
   Orchestrator (Hands) — scan → plan → route → execute
      |
-  Dispatcher (Gemini Flash — cheapest)
+  Dispatcher (Gemini 3 Flash — direct Google quota)
      |
      v
   Execution Plan (subtasks + model assignment)
      |
-  Tech Lead (Claude Sonnet) ← review/approve/modify plan
-     |                        ← handle escalations from dev agents
+  Tech Lead (GPT-5.4 Mini) ← review/approve/modify plan
+     |                       ← handle escalations from dev agents
      v
   Context Manager ← normalize context to structured JSON
      |               every model receives the SAME context
@@ -31,14 +31,14 @@ User Request (CLI / API / WebUI)
   +----------+----------+----------+
   |          |          |          |
 FE Dev    BE Dev    Reviewer   Debugger
-(Kimi)   (DeepSeek) (Gemini)  (Sonnet)
+(GPT-mini)(GPT-mini)(Gemini)  (GPT-mini)
   |          |          |          |
   +----------+----------+----------+
      |
   Decision Lock ← lock API contracts, DB schemas, auth flows
      |              agents cannot override locked decisions
      v
-  Synthesizer (Gemini Flash) ← merge all results
+  Synthesizer (Gemini 3 Flash) ← merge all results
      |
      v
   Final Output
@@ -57,24 +57,30 @@ orcai --model smart "refactor auth"      # Choose model
 ```
 
 ### Multi-Model Routing
-Each agent role maps to the most cost-effective model:
+Each agent role maps to the most cost-effective model (per `AGENT_ROLE_MAP` in `router/orchestrator-agent.js`):
 
-| Agent Role | Model | Cost/1M tokens | Specialty |
+| Agent Role | Model | Cost/1M in/out | Specialty |
 |---|---|---|---|
-| `dispatcher` | Gemini Flash | $0.15 | Task analysis, result synthesis |
-| `fe-dev` | Kimi K2.5 | $1.00 | React, Next.js, Vue, CSS, Tailwind |
-| `be-dev` | DeepSeek | $0.27 | NestJS, Express, DB, SQL, API |
-| `reviewer` | Gemini Flash | $0.15 | Code review, OWASP scan |
-| `tech-lead` | Claude Sonnet | $3.00 | Architecture, plan review, escalation |
-| `debugger` | Claude Sonnet | $3.00 | Complex multi-file debugging |
-| `docs` | DeepSeek | $0.27 | Documentation, JSDoc, README |
+| `dispatcher` | Gemini 3 Flash | $0.15 / $0.60 | Task analysis, result synthesis |
+| `architect` | Claude Opus 4.6 | $15 / $75 | System design, kien truc (~2% workload) |
+| `tech-lead` | GPT-5.4 Mini | $0.15 / $0.60 | Plan review, escalation (100% R-tier pass) |
+| `planner` | GPT-5.4 Mini | $0.15 / $0.60 | Plan generation, stage-RAG auto-inject |
+| `fe-dev` | GPT-5.4 Mini | $0.15 / $0.60 | React, Next.js, Vue, CSS, Tailwind |
+| `be-dev` | GPT-5.4 Mini | $0.15 / $0.60 | NestJS, Express, DB, SQL, API |
+| `reviewer` | Gemini 3 Flash | $0.15 / $0.60 | Code review, OWASP scan |
+| `debugger` | GPT-5.4 Mini | $0.15 / $0.60 | Multi-file trace, root cause analysis |
+| `scanner` | GPT-5.4 Mini | $0.15 / $0.60 | Project scan, file discovery |
+| `docs` | GPT-5.4 Mini | $0.15 / $0.60 | Documentation, JSDoc, README |
+| `builder` | GPT-5.4 Mini | $0.15 / $0.60 | General implementation (100% A+B pass) |
+
+**Note:** Claude Sonnet 4.6 was removed 2026-04-18 after bench — GPT-5.4 Mini passed 100% R-tier at 1/20th the cost. For premium quality: use `architect` (Opus 4.6). For long-context (>400K): use `qwen3-plus` (1M ctx, $0.26/1M). See `docs/MODEL-COMPARISON.md`.
 
 ### Hermes Brain + Orchestrator Hands
 - **Hermes** (Brain): memory, vector DB, auto-learn, self-improve — decides WHAT to do
 - **Orchestrator** (Hands): scan, plan, route, execute — decides HOW to do it
 
 ### Tech Lead Agent
-Claude Sonnet acts as Tech Lead — reviews execution plans before dev agents run:
+GPT-5.4 Mini acts as Tech Lead — reviews execution plans before dev agents run:
 - **Quick review** (free, no API call): catches model misassignment, circular deps, oversized tasks
 - **Full review** (API call): deep analysis when quick review finds multiple issues
 - **Escalation handler**: when dev agents get stuck, Tech Lead provides guidance
@@ -325,11 +331,10 @@ You need at least ONE provider key. **OpenRouter** is recommended (1 key = 200+ 
 
 | Provider | Sign up | Free tier |
 |---|---|---|
-| **OpenRouter** (recommended) | openrouter.ai/keys | $5 free credit |
-| Google Gemini | aistudio.google.com/apikey | Yes |
-| DeepSeek | platform.deepseek.com/api_keys | Yes |
-| Moonshot (Kimi) | platform.moonshot.cn/console/api-keys | Yes |
-| Anthropic (Sonnet) | console.anthropic.com/settings/keys | No |
+| **OpenRouter** (recommended — GPT-5.4 Mini, Opus, DeepSeek, Qwen...) | openrouter.ai/keys | $5 free credit |
+| Google Gemini (direct — `fast`/`smart`/`gemini` aliases) | aistudio.google.com/apikey | Yes (20 req/day free) |
+| DeepSeek (optional — `default` fallback) | platform.deepseek.com/api_keys | Yes |
+| Anthropic (optional — `architect` direct) | console.anthropic.com/settings/keys | No |
 
 ### Services (Docker)
 
@@ -464,7 +469,7 @@ curl http://localhost:5002/v1/chat/completions \
   }'
 ```
 
-Model names: `default` (Kimi), `smart` (Sonnet), `fast` (Gemini), `cheap` (DeepSeek)
+Model aliases (see `litellm_config.yaml`): `default` (DeepSeek V3.2), `cheap`/`gpt-mini` (GPT-5.4 Mini — workhorse), `fast`/`smart`/`gemini` (Gemini 3 Flash), `architect`/`opus` (Claude Opus 4.6), `qwen3-plus` (1M ctx), `qwen3-coder-flash`, `qwen3-max`. Free tier: `free-qwen`, `free-llama`, `free-glm`, `free-minimax`, `free-gpt-oss`. Local (LM Studio): `local-classifier`, `local-workhorse`, `local-heavy`, `local-embed`.
 
 ### Coding Agent Sandbox (Docker)
 
@@ -504,11 +509,19 @@ The router scores each model based on 5 factors:
 ### Fallback chain (automatic via LiteLLM)
 
 ```
-default:  Kimi K2.5 -> OpenRouter/Kimi -> DeepSeek
-smart:    Sonnet 4  -> OpenRouter/Sonnet -> Kimi K2.5
-fast:     Gemini Flash -> OpenRouter/Gemini -> DeepSeek
-cheap:    DeepSeek -> OpenRouter/DeepSeek -> Gemini Flash
+default:    DeepSeek V3.2 (OpenRouter)
+cheap:      GPT-5.4 Mini (OpenRouter)           ← workhorse alias
+gpt-mini:   GPT-5.4 Mini (OpenRouter)           ← backward-compat alias of cheap
+fast:       Gemini 3 Flash (Google direct)      ← pin primary
+smart:      Gemini 3 Flash (Google direct)      ← retargeted 2026-04-18 (was Sonnet)
+gemini:     Gemini 3 Flash (Google direct)      ← backward-compat alias of fast
+fast-or:    Gemini 3 Flash (OpenRouter)         ← use when Google quota exhausted
+architect:  Claude Opus 4.6 (OpenRouter)        ← SA / design only
+opus:       Claude Opus 4.6 (OpenRouter)        ← backward-compat alias of architect
+qwen3-plus: Qwen 3.5 Plus (OpenRouter, 1M ctx)
 ```
+
+**Removed 2026-04-18:** `sonnet` alias (Claude Sonnet 4.6) — replaced by `cheap` for reasoning/review, `architect` for deep design. Rationale logged in `litellm_config.yaml`.
 
 ## Configuration
 
