@@ -15,6 +15,9 @@
  *   /files để xem files đã thay đổi
  */
 
+// Force màu kể cả khi output qua pipe (WebUI terminal, SSH, tmux)
+process.env.FORCE_COLOR = process.env.FORCE_COLOR || '1';
+
 const { Command } = require('commander');
 const chalk = require('chalk');
 const ora = require('ora');
@@ -43,9 +46,10 @@ const { renderStatusLine } = require('../lib/status-line');
 const { WorktreeSession } = require('../lib/worktree');
 const { suggestSkills } = require('../lib/skill-matcher');
 const { renderMarkdown } = require('../lib/markdown-render');
-const { promptInput } = require('../lib/interactive-input');
+const { InputQueue } = require('../lib/input-queue');
 const { runDoctor, formatDoctor } = require('../lib/doctor');
 const { estimatePromptCost } = require('../lib/cost-estimate');
+const { LocalAssistant } = require('../lib/local-assistant');
 const { loadClaudeMdHierarchy } = require('../lib/claude-md-loader');
 const { TranscriptLogger } = require('../lib/transcript-logger');
 const { renderTodos } = require('../tools/agent-todos');
@@ -56,6 +60,8 @@ const { delegateToOrchestrator, checkOrchestratorHealth } = require('../lib/orch
 const { replayTranscript, listTranscripts } = require('../lib/replay');
 const { AgentBus } = require('../lib/agent-bus');
 const { getRateLimitState } = require('../lib/retry');
+const { getCostTracker } = require('../lib/cost-tracker');
+const { SessionContinuity } = require('../lib/session-continuity');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
@@ -94,12 +100,13 @@ program
   .option('--no-mcp', 'Disable MCP server loading')
   .option('--no-hooks', 'Disable hooks (PreToolUse/PostToolUse/Stop)')
   .option('--no-repo-cache', 'Force re-scan repo (skip repo-cache.json)')
+  .option('--no-warm-context', 'Disable auto warm-context từ session trước (fresh start)')
   .option('--mcp-config <path>', 'Path to additional MCP config JSON')
   .option('--worktree', 'Run agent in isolated git worktree (safer for destructive ops)')
   .option('--no-markdown', 'Disable markdown rendering in output')
   .option('--no-status-line', 'Hide status line in interactive mode')
   .option('--doctor', 'Run environment health check and exit')
-  .option('--estimate-threshold <usd>', 'Confirm before run when estimated cost exceeds this (default 0.05)', '0.05')
+  .option('--estimate-threshold <usd>', 'Confirm before run when estimated cost exceeds this (default 0.50)', '0.50')
   .option('--thinking', 'Enable extended thinking for Claude models')
   .option('--thinking-budget <tokens>', 'Extended thinking budget (default 8000)', '8000')
   .option('--no-thinking-auto', 'Disable auto-thinking for complex prompt keywords')
@@ -194,6 +201,22 @@ program
     opts._budget = budget;
     opts._hookRunner = hookRunner;
 
+    // Wire daily cost tracker → real-time budget warnings
+    const costTracker = getCostTracker(projectDir);
+    costTracker.on('cap-warning', (e) => {
+      const pct = e.percent.toFixed(0);
+      const rem = (e.capUSD - e.currentUSD).toFixed(4);
+      const label = e.capType === 'daily' ? 'Daily budget' : 'Task budget';
+      console.log(chalk.yellow(`\n  ⚠ ${label} ${pct}%: $${e.currentUSD.toFixed(4)} / $${e.capUSD} — còn $${rem}`));
+    });
+    costTracker.on('cap-exceeded', (e) => {
+      const label = e.capType === 'daily' ? 'Daily budget' : 'Task budget';
+      const resetStr = _formatDuration(_msToMidnight());
+      console.log(chalk.red(`\n  ✗ ${label} hết: $${e.currentUSD.toFixed(4)} / $${e.capUSD}`));
+      console.log(chalk.gray(`    Reset lúc 00:00 — còn ${resetStr}`));
+    });
+    opts._costTracker = costTracker;
+
     // Agent bus (inter-agent messaging) — shared across CLI session
     opts._agentBus = new AgentBus();
     opts._agentBus.on('spawn', (e) => {
@@ -286,11 +309,8 @@ program
       return;
     }
 
-    if (opts.interactive || !prompt) {
-      await interactiveMode(projectDir, opts);
-    } else {
-      await oneShotMode(prompt, projectDir, opts);
-    }
+    // Luon dung interactive mode — neu co prompt thi chay prompt do truoc, roi o lai session
+    await interactiveMode(projectDir, { ...opts, initialPrompt: prompt || null });
 
     // Cleanup
     if (mcpRegistry) await mcpRegistry.shutdown();
@@ -309,6 +329,18 @@ program
       }
     }
   });
+
+// === Budget helpers ===
+function _msToMidnight() {
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return midnight - now;
+}
+function _formatDuration(ms) {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
 
 // === MCP Init ===
 async function initMCP(projectDir, opts) {
@@ -335,10 +367,28 @@ async function initMCP(projectDir, opts) {
 // === Banner ===
 function printBanner(projectDir, model, role) {
   const projectName = path.basename(projectDir);
-  console.log(chalk.cyan.bold('\n  OrcAI') + chalk.gray(' — Coding Agent v2'));
-  console.log(chalk.gray(`  Project: ${chalk.white(projectName)}`));
-  console.log(chalk.gray(`  Model: ${chalk.yellow(model)} | Role: ${chalk.green(role)}`));
-  console.log(chalk.gray('  ─'.repeat(25)));
+  const W = 50;
+  const line = chalk.gray('  ' + '─'.repeat(W));
+  console.log('');
+  console.log(line);
+  console.log(chalk.cyan.bold('  ◆ OrcAI') + chalk.gray(' v2  ') + chalk.gray('·') + chalk.gray('  ' + projectName));
+  console.log(chalk.gray('  ') + chalk.yellow('⬡ ' + model) + chalk.gray('  ·  ') + chalk.green('◈ ' + role));
+  console.log(line);
+}
+
+// Build context block tu session truoc (warm) hoac local assistant (embed)
+// Uu tien: local assistant > warm context > nothing
+function buildWarmBlock(opts) {
+  // Local assistant block (tu embedding search + Qwen 7B summary)
+  if (opts._localContextBlock) return opts._localContextBlock;
+  // Warm context tu session truoc
+  const files = opts._warmFiles;
+  if (!files || files.length === 0) return '';
+  const lines = files.map(f => {
+    const preview = (f.content || '').slice(0, 2000);
+    return `--- ${f.path} ---\n${preview}${f.content.length > 2000 ? '\n[... truncated]' : ''}`;
+  }).join('\n\n');
+  return `\n\n=== PRE-LOADED FILES (session trước — KHÔNG cần read_file lại) ===\n${lines}\n=== END PRE-LOADED ===`;
 }
 
 // === Build System Prompt (với repo context) ===
@@ -419,11 +469,13 @@ NGUYÊN TẮC:
 11. Phat hien bug/bay quan trong → memory_save(type: "gotcha", ...) de nho cho lan sau
 12. Task doc lap CO THE lam song song → spawn_team (max 5 agent parallel) thay vi tung spawn_subagent
 
-HIEU QUA TOKEN (QUAN TRONG):
-- TRUST TOOL OUTPUT: neu search_files / glob tra ve so ket qua (count/list), TIN ket qua. KHONG read_file de "double-check" — moi read_file ton 2-10K token.
-- Task dem/tim: uu tien search_files > read_file. read_file chi khi can hieu logic code.
-- KHONG goi cung read_file voi cung path 2 lan — tool result da co trong history, reuse thay vi re-read.
-- Neu task co the tra loi bang 1 tool call, tra loi luon — khong read them de "verify".
+HIEU QUA TOKEN (QUAN TRONG — VI PHAM SE LANG PHI TIEN):
+- PROJECT STRUCTURE da co o tren (=== PROJECT STRUCTURE ===). KHONG goi list_files("/") hay glob("**") de "quet lai" — da co roi.
+- TRUST TOOL OUTPUT: neu search_files / glob tra ve so ket qua, TIN ket qua. KHONG read_file de "double-check".
+- Task dem/tim file: DUNG search_files/glob voi pattern cu the. KHONG list toan bo roi dem tay.
+- KHONG goi cung read_file voi cung path 2 lan trong cung session — reuse tu history.
+- Neu PRE-LOADED FILES co o duoi, KHONG doc lai — content da co san.
+- Neu task co the tra loi bang 1 tool call hoac suy luan tu context, tra loi luon.
 
 QUY TRÌNH:
 1. memory_recall(prompt) — xem kinh nghiem cu neu co
@@ -432,13 +484,23 @@ QUY TRÌNH:
 4. Thực hiện thay đổi (edit_file hoặc write_file hoac edit_files cho batch)
 5. Verify (execute_command: chạy test, build, lint)
 6. Sửa nếu cần (self-correction loop)
-7. Gọi task_complete khi xong (summary se duoc context-guard verify)${claudeMdBlock}${mcpHint}`;
+7. Gọi task_complete khi xong (summary se duoc context-guard verify)${claudeMdBlock}${mcpHint}${buildWarmBlock(opts)}`;
 }
 
 // === Create Agent Loop với callbacks ===
 function createAgent(projectDir, opts) {
   let spinner = null;
   let currentTool = '';
+  let currentArgs = null;
+  let _llmStart = null;
+  // Buffer text streaming — flush + render markdown khi tool call bat dau hoac response done
+  let _textBuf = '';
+  const flushText = () => {
+    if (!_textBuf) return;
+    const rendered = opts.markdown !== false ? renderMarkdown(_textBuf) : _textBuf;
+    process.stdout.write('\n' + rendered + '\n');
+    _textBuf = '';
+  };
 
   const approvalState = opts._approvalState || new ApprovalState({ autoYes: !!opts.yes });
 
@@ -475,20 +537,32 @@ function createAgent(projectDir, opts) {
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
       ? async (filePath, before, after) => {
           if (spinner) spinner.stop();
-          return await askApproval(filePath, before, after, approvalState);
+          opts._iqRef?.q?.mute();
+          try {
+            return await askApproval(filePath, before, after, approvalState);
+          } finally {
+            opts._iqRef?.q?.unmute();
+          }
         }
       : null,
 
-    // Human-in-the-loop confirm
+    // Human-in-the-loop confirm — mute InputQueue trước để tránh conflict readline trên cùng stdin
     onConfirm: opts.confirm !== false ? async (command, reason) => {
       if (spinner) spinner.stop();
-      const { confirmed } = await inquirer.prompt([{
-        type: 'confirm',
-        name: 'confirmed',
-        message: chalk.yellow(`⚠️  ${reason}\n   Command: ${chalk.white(command)}\n   Cho phép?`),
-        default: false
-      }]);
-      return confirmed;
+      opts._iqRef?.q?.mute();
+      try {
+        return await new Promise(resolve => {
+          const readline = require('readline');
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const msg = chalk.yellow(`\n  ⚠️  ${reason}\n  Command: ${chalk.white(command)}\n  Cho phép? [y/N] `);
+          rl.question(msg, (ans) => {
+            rl.close();
+            resolve(ans.trim().toLowerCase() === 'y');
+          });
+        });
+      } finally {
+        opts._iqRef?.q?.unmute();
+      }
     } : null,
 
     // Agent self-todos: re-render moi khi thay doi
@@ -503,7 +577,9 @@ function createAgent(projectDir, opts) {
 
     // Callbacks cho UI
     onThinking: (iter, max) => {
+      flushText();
       if (spinner) spinner.stop();
+      _llmStart = Date.now();
       spinner = ora({
         text: chalk.gray(`Thinking... (${iter}/${max})`),
         spinner: 'dots'
@@ -511,7 +587,9 @@ function createAgent(projectDir, opts) {
     },
 
     onToolCall: (name, args) => {
+      flushText();
       currentTool = name;
+      currentArgs = args;
       let detail = '';
       if (name === 'read_file') detail = args.path;
       else if (name === 'write_file') detail = args.path;
@@ -527,46 +605,60 @@ function createAgent(projectDir, opts) {
     onToolResult: (name, result) => {
       const parsed = JSON.parse(result.content);
       const icon = parsed.success ? chalk.green('✓') : chalk.red('✗');
+      const args = currentArgs || {};
 
       if (spinner) spinner.stop();
 
-      // Hiển thị kết quả ngắn gọn
       if (name === 'read_file' && parsed.success) {
-        console.log(`  ${icon} ${chalk.cyan('read')} ${parsed.showing} of ${parsed.total_lines} lines`);
+        const p = chalk.cyan(args.path || parsed.path || '?');
+        console.log(`  ${icon} ${chalk.cyan('read')} ${p} ${chalk.gray(`(${parsed.showing} / ${parsed.total_lines} lines)`)}`);
       } else if (name === 'write_file' && parsed.success) {
-        console.log(`  ${icon} ${chalk.green(parsed.action)} ${parsed.path} (${parsed.lines} lines)`);
+        const action = parsed.action === 'created' ? chalk.green('new') : chalk.yellow('write');
+        console.log(`  ${icon} ${action} ${chalk.white(parsed.path)} ${chalk.gray(`(${parsed.lines} lines)`)}`);
       } else if (name === 'edit_file' && parsed.success) {
-        console.log(`  ${icon} ${chalk.yellow('edit')} ${parsed.path} (${parsed.replacements} replacements)`);
+        console.log(`  ${icon} ${chalk.yellow('edit')} ${chalk.white(parsed.path)} ${chalk.gray(`(${parsed.replacements} replacements)`)}`);
       } else if (name === 'execute_command') {
-        const exitIcon = parsed.exit_code === 0 ? chalk.green('✓') : chalk.red(`exit ${parsed.exit_code}`);
-        console.log(`  ${exitIcon} ${chalk.blue('$')} ${chalk.gray(result.tool_call_id ? '' : '')}`);
-        // Hiển thị stdout/stderr ngắn gọn
+        const cmd = args.command?.slice(0, 80) || '?';
+        const exitCode = parsed.exit_code ?? parsed.exit;
+        const exitIcon = exitCode === 0 ? chalk.green('✓') : chalk.red(`✗ exit ${exitCode}`);
+        console.log(`  ${exitIcon} ${chalk.blue('$')} ${chalk.white(cmd)}`);
         if (parsed.stdout) {
-          const lines = parsed.stdout.split('\n');
-          const preview = lines.slice(0, 5).join('\n');
-          console.log(chalk.gray('    ' + preview.replace(/\n/g, '\n    ')));
-          if (lines.length > 5) console.log(chalk.gray(`    ... +${lines.length - 5} lines`));
+          const lines = parsed.stdout.trimEnd().split('\n');
+          const preview = lines.slice(0, 5).map(l => '    ' + l).join('\n');
+          console.log(chalk.gray(preview));
+          if (lines.length > 5) console.log(chalk.gray(`    … +${lines.length - 5} lines`));
         }
-        if (parsed.stderr && !parsed.success) {
+        if (parsed.stderr && exitCode !== 0) {
           console.log(chalk.red('    ' + parsed.stderr.split('\n').slice(0, 3).join('\n    ')));
         }
       } else if (name === 'search_files' && parsed.success) {
-        console.log(`  ${icon} ${chalk.magenta('search')} "${parsed.pattern}" → ${parsed.total} matches`);
+        console.log(`  ${icon} ${chalk.magenta('search')} ${chalk.gray('"')}${parsed.pattern}${chalk.gray('"')} ${chalk.gray('→')} ${chalk.white(parsed.total)} matches`);
       } else if (name === 'list_files' && parsed.success) {
-        console.log(`  ${icon} ${chalk.cyan('list')} ${parsed.files.length} files`);
+        const p = args.path || '.';
+        console.log(`  ${icon} ${chalk.cyan('list')} ${chalk.gray(p)} ${chalk.gray(`(${parsed.files.length} entries)`)}`);
+      } else if (name === 'grep_files' && parsed.success) {
+        console.log(`  ${icon} ${chalk.magenta('grep')} ${chalk.gray('"')}${args.pattern || '?'}${chalk.gray('"')} ${chalk.gray('→')} ${chalk.white(parsed.total ?? parsed.matches?.length ?? '?')} matches`);
       } else if (name === 'task_complete') {
-        // Handled after loop
+        // Handled in printResult
       } else if (!parsed.success) {
-        console.log(`  ${icon} ${chalk.red(name)}: ${parsed.error?.slice(0, 100)}`);
+        console.log(`  ${icon} ${chalk.red(name)}: ${chalk.gray((parsed.error || '').slice(0, 120))}`);
       }
     },
 
     onText: (text) => {
-      if (spinner) spinner.stop();
-      // Streaming: per-chunk passthrough (markdown rendering requires complete
-      // message to handle multi-char markers like ** and ``` correctly).
-      // renderMarkdown is applied to batched outputs (plan display, init, help).
-      process.stdout.write(text);
+      if (spinner) { spinner.stop(); spinner = null; }
+      // Buffer streaming chunks — flush + render markdown khi tool call hoac response done
+      _textBuf += text;
+    },
+
+    onComplete: () => {
+      flushText();
+      if (_llmStart) {
+        const ms = Date.now() - _llmStart;
+        const label = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+        process.stdout.write(chalk.gray(`  ⏱ ${label}\n`));
+        _llmStart = null;
+      }
     },
 
     onError: (err) => {
@@ -628,7 +720,7 @@ async function oneShotMode(prompt, projectDir, opts) {
   const systemPrompt = await buildSystemPrompt(projectDir, opts.role, opts);
 
   // Pre-run cost estimate — skip khi auto-approve (--yes), --no-confirm, hoac benchmark mode
-  const threshold = parseFloat(opts.estimateThreshold || '0.05');
+  const threshold = parseFloat(opts.estimateThreshold || '0.50');
   const skipCostPrompt = opts.yes || opts.confirm === false || process.env.ORCAI_BENCHMARK === '1';
   if (!skipCostPrompt && threshold > 0) {
     const est = estimatePromptCost({ systemPrompt, userPrompt: expanded, model: opts.model });
@@ -684,8 +776,13 @@ function printCacheStats(agent) {
 // === Interactive Mode ===
 async function interactiveMode(projectDir, opts) {
   const systemPrompt = await buildSystemPrompt(projectDir, opts.role, opts);
-  const { agent } = createAgent(projectDir, opts);
+  // Ref lazy — được điền vào sau khi inputQueue được tạo (dưới).
+  // Dùng để onConfirm / onWriteApproval có thể mute InputQueue tránh conflict stdin.
+  const _iqRef = { q: null };
+  const { agent } = createAgent(projectDir, { ...opts, _iqRef });
   let hasRun = false;
+  const _sessionStart = Date.now();
+  let _exchangeCount = 0;
 
   // Discover custom slash commands (skills/*.md + .claude/commands/*.md + global)
   const customCommands = discoverCommands(projectDir);
@@ -719,6 +816,46 @@ async function interactiveMode(projectDir, opts) {
     }
   } else {
     session = cm.createSession();
+
+    // Auto warm-context: lay file content tu session gan nhat inject vao systemPrompt
+    // KHONG inject vao messages (tranh malformed history / context lan)
+    // Chi dung khi: cung project, < 30 phut, git HEAD chua thay doi
+    if (opts.warmContext !== false) {
+      try {
+        const { execSync } = require('child_process');
+        const currentHead = (() => {
+          try { return execSync('git rev-parse HEAD', { cwd: projectDir, stdio: ['pipe','pipe','pipe'] }).toString().trim(); } catch { return null; }
+        })();
+        const warmFiles = cm.getWarmContext({ maxAgeMs: 30 * 60 * 1000, currentGitHead: currentHead, maxFiles: 10 });
+        if (warmFiles.length > 0) {
+          // Luu vao opts de buildSystemPrompt inject
+          opts._warmFiles = warmFiles;
+          console.log(chalk.gray(`  ♻ Warm: ${warmFiles.length} file(s) từ session trước đã pre-loaded vào context`));
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Init LocalAssistant (Qwen 7B + nomic embed)
+    // Bootstrap: auto-start LM Studio nếu cần, retry 3 lần, fallback cloud-only
+    if (opts.localAssist !== false) {
+      try {
+        const { EmbeddingStore } = require('../lib/embeddings');
+        const lmUrl = process.env.LMSTUDIO_URL || 'http://localhost:1234';
+        const embeddings = new EmbeddingStore({ projectDir, endpoint: lmUrl });
+        opts._localAssistant = new LocalAssistant({ projectDir, embeddings, lmUrl });
+
+        // Bootstrap non-blocking — không delay startup, log khi xong
+        opts._localAssistant.isAvailable().then(avail => {
+          if (avail) {
+            console.log(chalk.gray('  🤖 Local assist ready (Qwen 7B + nomic embed)'));
+          } else {
+            console.log(chalk.gray('  ℹ Local assist offline — cloud-only mode'));
+          }
+        }).catch(() => {
+          console.log(chalk.gray('  ℹ Local assist unavailable — cloud-only mode'));
+        });
+      } catch { opts._localAssistant = null; }
+    }
   }
 
   // Initialize transcript logger with actual session id
@@ -729,6 +866,11 @@ async function interactiveMode(projectDir, opts) {
     logger.logMeta({ event: 'session_start', sessionId: session.id, model: opts.model, role: opts.role });
   }
 
+  // Session continuity — snapshot in-flight state, cho phép resume sau khi budget hết / crash
+  const _sc = new SessionContinuity({ projectDir });
+  const _scId = _sc.startSession({ prompt: opts.initialPrompt || '' });
+  const _scHandle = _sc.attachToConversation(null, { sessionId: _scId, snapshotEveryTurns: 5 });
+
   console.log(chalk.gray(`  Session: ${session.id}`));
   if (opts._transcriptLogger) {
     console.log(chalk.gray(`  Transcript: ${path.relative(projectDir, opts._transcriptLogger.getPath())}`));
@@ -737,6 +879,16 @@ async function interactiveMode(projectDir, opts) {
     console.log(chalk.gray(`  ${customCommands.size} custom command(s) loaded. /help to list.`));
   }
   console.log(chalk.gray('  Gõ prompt. @path để attach file. /help để xem commands.\n'));
+
+  // InputQueue — always-on listener, buffer input khi agent chạy
+  const inputQueue = new InputQueue();
+  _iqRef.q = inputQueue; // wire lazy ref để onConfirm / onWriteApproval có thể mute
+  inputQueue.start();
+  inputQueue.updateCompleter({
+    projectDir,
+    customCommandNames: [...customCommands.keys()],
+    builtinCommandNames: BUILTIN_CMDS
+  });
 
   // Hook vào executor để track file changes cho undo
   const origWriteFile = agent.executor.handlers['write_file'];
@@ -771,6 +923,9 @@ async function interactiveMode(projectDir, opts) {
     return result;
   };
 
+  // Neu co initialPrompt (tu one-shot), dung luon khong hoi
+  let _pendingInitial = opts.initialPrompt || null;
+
   while (true) {
     // Status line — hien thi state truoc prompt
     if (opts.statusLine !== false && hasRun) {
@@ -782,16 +937,21 @@ async function interactiveMode(projectDir, opts) {
     }
 
     let input;
-    try {
-      // readline-based input voi tab completion cho /commands + @files
-      input = await promptInput({
-        projectDir,
-        customCommandNames: [...customCommands.keys()],
-        builtinCommandNames: BUILTIN_CMDS,
-        prompt: chalk.cyan('❯ ')
-      });
-    } catch {
-      break; // Ctrl+C / SIGINT
+    if (_pendingInitial) {
+      input = _pendingInitial;
+      _pendingInitial = null;
+    } else {
+      try {
+        // Cập nhật completer mỗi vòng (custom commands có thể thay đổi)
+        inputQueue.updateCompleter({
+          projectDir,
+          customCommandNames: [...customCommands.keys()],
+          builtinCommandNames: BUILTIN_CMDS
+        });
+        input = await inputQueue.next(chalk.cyan('❯ '));
+      } catch {
+        break; // Ctrl+C / SIGINT
+      }
     }
 
     if (!input) continue;
@@ -1114,7 +1274,20 @@ async function interactiveMode(projectDir, opts) {
     if (input === '/budget') {
       const s = agent.budget.getStats();
       const cap = s.cap_usd === null ? 'unlimited' : `$${s.cap_usd.toFixed(4)}`;
-      console.log(chalk.gray(`  Budget: $${s.spent_usd.toFixed(4)} / ${cap} — ${s.calls} calls${s.exceeded ? chalk.red(' [EXCEEDED]') : ''}`));
+      console.log(chalk.gray(`  Session: $${s.spent_usd.toFixed(4)} / ${cap} — ${s.calls} calls${s.exceeded ? chalk.red(' [EXCEEDED]') : ''}`));
+      if (opts._costTracker) {
+        const pool = opts._costTracker.getPoolStatus();
+        const dailyCap = pool.dailyCapUSD ? `$${pool.dailyCapUSD}` : '∞';
+        const dailyPct = pool.dailyCapUSD ? ` (${((pool.dailySpentUSD / pool.dailyCapUSD) * 100).toFixed(0)}%)` : '';
+        console.log(chalk.gray(`  Daily:   $${pool.dailySpentUSD.toFixed(4)} / ${dailyCap}${dailyPct}`));
+        const isOver = pool.dailyCapUSD && pool.dailySpentUSD >= pool.dailyCapUSD;
+        const resetStr = _formatDuration(_msToMidnight());
+        if (isOver) {
+          console.log(chalk.red(`  Daily cap đã hết — reset lúc 00:00 (còn ${resetStr})`));
+        } else {
+          console.log(chalk.gray(`  Reset lúc 00:00 — còn ${resetStr}`));
+        }
+      }
       continue;
     }
 
@@ -1142,12 +1315,18 @@ async function interactiveMode(projectDir, opts) {
       const task = input.slice('/plan '.length).trim();
       if (!task) { console.log(chalk.yellow('  Usage: /plan <task>')); continue; }
       const systemPlanner = await buildSystemPrompt(projectDir, 'planner', opts);
-      const result = await runPlanFlow(task, {
-        systemPromptPlanner: systemPlanner,
-        systemPromptBuilder: systemPrompt,
-        createPlannerAgent: () => createAgent(projectDir, { ...opts, role: 'planner' }).agent,
-        createBuilderAgent: () => createAgent(projectDir, opts).agent
-      });
+      inputQueue.mute(); // inquirer + agent runs inside runPlanFlow không dùng inputQueue
+      let result;
+      try {
+        result = await runPlanFlow(task, {
+          systemPromptPlanner: systemPlanner,
+          systemPromptBuilder: systemPrompt,
+          createPlannerAgent: () => createAgent(projectDir, { ...opts, role: 'planner', _iqRef }).agent,
+          createBuilderAgent: () => createAgent(projectDir, { ...opts, _iqRef }).agent
+        });
+      } finally {
+        inputQueue.unmute();
+      }
       if (!result.approved) {
         console.log(chalk.gray('  Plan rejected.'));
       } else {
@@ -1160,11 +1339,12 @@ async function interactiveMode(projectDir, opts) {
       const sessions = cm.listSessions(10);
       if (sessions.length === 0) { console.log(chalk.gray('  No prior sessions.')); continue; }
       try {
+        inputQueue.mute();
         const { pick } = await inquirer.prompt([{
           type: 'list', name: 'pick',
           message: 'Resume which session?',
           choices: sessions.map(s => ({ name: `${s.id}  ${s.summary}  (${new Date(s.createdAt).toLocaleString()})`, value: s.id }))
-        }]);
+        }]).finally(() => inputQueue.unmute());
         const data = cm.loadSession(pick);
         if (data?.messages?.length) {
           agent.messages = data.messages;
@@ -1172,7 +1352,7 @@ async function interactiveMode(projectDir, opts) {
           session = { id: data.id, createdAt: data.createdAt, projectDir };
           console.log(chalk.green(`  Loaded ${data.messages.length} messages from ${pick}`));
         }
-      } catch { /* cancelled */ }
+      } catch { inputQueue.unmute(); /* cancelled */ }
       continue;
     }
 
@@ -1253,16 +1433,79 @@ ${formatCommandList(customCommands)}
       );
     }
 
-    // Run prompt
-    console.log('');
-    let result;
-    if (!hasRun) {
-      result = await agent.run(systemPrompt, expandedInput);
-      hasRun = true;
-    } else {
-      result = await agent.continueWith(expandedInput);
+    // Local assistant: pre-select files lien quan qua embedding + Qwen 7B (moi turn)
+    // Isolated theo query — moi cau hoi → context khac, khong lan lan nhau
+    // Chay song song voi buildSystemPrompt de giam latency
+    let ctxBlockPromise = null;
+    if (opts.localAssist !== false && opts._localAssistant) {
+      ctxBlockPromise = opts._localAssistant.buildContextBlock(expandedInput).catch(() => null);
     }
 
+    // Build system prompt song song voi context search
+    const baseSystemPrompt = await buildSystemPrompt(projectDir, opts.role,
+      { ...opts, _localContextBlock: null }); // base prompt khong co context block cu
+
+    // Await context block (neu da xong thi resolve ngay, neu chua thi doi)
+    if (ctxBlockPromise) {
+      const ctxResult = await ctxBlockPromise;
+      if (ctxResult?.block && ctxResult.files?.length > 0) {
+        opts._localContextBlock = ctxResult.block;
+        console.log(chalk.gray(`  🔍 Local assist (${ctxResult.source}): ${ctxResult.files.length} file(s) pre-loaded`));
+      } else {
+        opts._localContextBlock = null;
+      }
+    }
+
+    // Final system prompt: base + context block (neu co)
+    const currentSystemPrompt = opts._localContextBlock
+      ? baseSystemPrompt + opts._localContextBlock
+      : (hasRun ? baseSystemPrompt : systemPrompt);
+
+    // Run agent — InputQueue handle Ctrl+C → interrupt
+    console.log('');
+    inputQueue.agentStart(agent);
+
+    let result;
+    try {
+      if (!hasRun) {
+        result = await agent.run(currentSystemPrompt, expandedInput);
+        hasRun = true;
+      } else {
+        result = await agent.continueWith(expandedInput);
+      }
+    } finally {
+      inputQueue.agentDone();
+    }
+
+    // Interrupt-and-amend flow:
+    // - Nếu user đã queue tin nhắn trong lúc agent chạy → dùng luôn làm amendment
+    // - Nếu chưa → hỏi (Enter để bỏ qua)
+    if (result.aborted && result.reason === 'interrupted') {
+      let amendment;
+      if (inputQueue.hasQueued()) {
+        amendment = inputQueue.dequeue();
+        console.log(chalk.yellow(`  ⚡ Dừng sau ${result.iterations} iter. Dùng context đã queue: "${amendment.slice(0, 60)}${amendment.length > 60 ? '…' : ''}"`));
+      } else {
+        console.log(chalk.yellow(`  ⚡ Dừng sau ${result.iterations} iter. Bổ sung context? (Enter để bỏ qua)`));
+        try {
+          amendment = await inputQueue.next(chalk.yellow('  + '));
+        } catch { amendment = ''; }
+      }
+
+      if (amendment && amendment.trim()) {
+        // Inject context bổ sung, agent tái dùng context đã có (file reads, plan)
+        console.log('');
+        inputQueue.agentStart(agent);
+        try {
+          const amendMsg = `[Bổ sung context từ user]: ${amendment}\nHãy điều chỉnh hoặc tiếp tục task theo context mới này.`;
+          result = await agent.continueWith(amendMsg);
+        } finally {
+          inputQueue.agentDone();
+        }
+      }
+    }
+
+    _exchangeCount++;
     printResult(result);
     printCacheStats(agent);
 
@@ -1280,6 +1523,15 @@ ${formatCommandList(customCommands)}
       toolStats: agent.executor.getStats()
     });
 
+    // Snapshot in-flight state cho session continuity
+    _scHandle.onTurn({
+      openTasks: agent.executor.filesChanged ? [...agent.executor.filesChanged].map(f => `edit:${f}`) : [],
+      inFlightFiles: [...agent.executor.filesChanged],
+      modelsUsed: [opts.model],
+      nextStep: result.success ? null : (result.summary || result.reason || null),
+      errorsSeen: result.success ? [] : [result.reason || 'unknown']
+    });
+
     console.log('');
   }
 
@@ -1291,36 +1543,91 @@ ${formatCommandList(customCommands)}
     toolStats: agent.executor.getStats()
   });
 
+  // Đóng session continuity với summary cuối
+  _scHandle.onEnd({
+    status: 'completed',
+    summary: `${_exchangeCount} exchanges, ${[...agent.executor.filesChanged].length} files changed`
+  });
+
+  inputQueue.close(); // giải phóng persistent readline trước khi thoát
+
+  const _sessionMs = Date.now() - _sessionStart;
+  const _sessionLabel = _sessionMs < 60000
+    ? `${(_sessionMs / 1000).toFixed(0)}s`
+    : `${Math.floor(_sessionMs / 60000)}m ${Math.floor((_sessionMs % 60000) / 1000)}s`;
   console.log(chalk.gray(`\n  Session saved: ${session.id}`));
+  console.log(chalk.gray(`  Session time: ${_sessionLabel}  ·  ${_exchangeCount} exchange${_exchangeCount !== 1 ? 's' : ''}`));
   console.log(chalk.gray('  Bye!\n'));
 }
 
 // === Print Result ===
 function printResult(result) {
+  const W = 56;
+  const SEP = chalk.gray('  ' + '─'.repeat(W));
   console.log('');
-  console.log(chalk.gray('  ─'.repeat(25)));
+  console.log(SEP);
 
+  // Header — status + wall-clock timing
+  const wallMs = result.wall_elapsed_ms || result.elapsed_ms || 0;
+  const elapsed = wallMs > 0
+    ? chalk.gray(`  ⏱ ${wallMs < 1000 ? wallMs + 'ms' : (wallMs / 1000).toFixed(1) + 's'}`)
+    : '';
   if (result.success) {
-    console.log(chalk.green.bold('  ✓ XONG'));
-    if (result.summary) {
-      console.log(chalk.white(`  ${result.summary}`));
-    }
+    console.log(chalk.green.bold('  ✓ Hoàn thành') + elapsed);
   } else {
-    console.log(chalk.red.bold(`  ✗ ${result.aborted ? 'DỪNG' : 'CHƯA XONG'}`));
-    if (result.reason === 'too_many_errors') {
-      console.log(chalk.red('  Quá nhiều lỗi liên tiếp'));
-    } else if (result.reason === 'max_iterations') {
-      console.log(chalk.yellow('  Đạt giới hạn iterations'));
-    }
+    const label = result.reason === 'too_many_errors' ? 'Quá nhiều lỗi'
+      : result.reason === 'max_iterations' ? 'Hết iterations'
+      : 'Chưa xong';
+    console.log(chalk.red.bold(`  ✗ ${label}`) + elapsed);
   }
 
+  // Summary — task_complete.summary (uu tien) hoac final_message (fallback khi model tra text thuan)
+  const displayText = result.summary || (!result.summary && !result.tool_calls ? result.final_message : null);
+  if (displayText) {
+    console.log('');
+    const rendered = renderMarkdown(displayText);
+    rendered.split('\n').forEach(l => console.log('  ' + l));
+  }
+
+  // Files changed
   if (result.files_changed && result.files_changed.length > 0) {
-    console.log(chalk.gray(`  ${result.files_changed.length} files thay đổi:`));
-    result.files_changed.forEach(f => console.log(chalk.green(`    + ${f}`)));
+    console.log('');
+    console.log(chalk.gray('  ') + chalk.bold.white(`Files changed (${result.files_changed.length}):`));
+    result.files_changed.forEach(f => {
+      console.log(`    ${chalk.yellow('✎')} ${chalk.white(f)}`);
+    });
   }
 
-  console.log(chalk.gray(`  ${result.iterations} iterations | ${result.tool_calls || 0} tool calls | ${result.errors || 0} errors`));
-  console.log(chalk.gray('  ─'.repeat(25)));
+  // Commands run
+  if (result.commands_run_detail && result.commands_run_detail.length > 0) {
+    console.log('');
+    console.log(chalk.gray('  ') + chalk.bold.white(`Commands (${result.commands_run_detail.length}):`));
+    result.commands_run_detail.forEach(({ command, exit_code }) => {
+      const ok = exit_code === 0;
+      const icon = ok ? chalk.green('✓') : chalk.red('✗');
+      const cmd = (command || '').slice(0, 70);
+      console.log(`    ${icon} ${chalk.gray('$')} ${ok ? chalk.white(cmd) : chalk.red(cmd)}`);
+    });
+  }
+
+  // Tool breakdown
+  const byTool = result.by_tool || {};
+  const toolParts = Object.entries(byTool)
+    .filter(([k]) => k !== 'task_complete')
+    .sort(([, a], [, b]) => b - a)
+    .map(([k, v]) => chalk.gray(`${k}×${v}`));
+
+  console.log('');
+  const statParts = [
+    chalk.gray(`${result.iterations} iter`),
+    chalk.gray(`${result.tool_calls || 0} tools`),
+    result.errors ? chalk.red(`${result.errors} err`) : chalk.gray('0 err'),
+  ];
+  console.log('  ' + statParts.join(chalk.gray('  ·  ')));
+  if (toolParts.length > 0) {
+    console.log('  ' + toolParts.join(chalk.gray('  ·  ')));
+  }
+  console.log(SEP);
 }
 
 // === Run ===
