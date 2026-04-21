@@ -62,6 +62,7 @@ const { AgentBus } = require('../lib/agent-bus');
 const { getRateLimitState } = require('../lib/retry');
 const { getCostTracker } = require('../lib/cost-tracker');
 const { SessionContinuity } = require('../lib/session-continuity');
+const { RequestAnalyzer, routingToModel, formatAnalysisSummary } = require('../lib/request-analyzer');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
@@ -871,6 +872,13 @@ async function interactiveMode(projectDir, opts) {
   const _scId = _sc.startSession({ prompt: opts.initialPrompt || '' });
   const _scHandle = _sc.attachToConversation(null, { sessionId: _scId, snapshotEveryTurns: 5 });
 
+  // Request analyzer — phân tích intent + routing trước mỗi prompt
+  const requestAnalyzer = new RequestAnalyzer({
+    litellmUrl: opts.url,
+    litellmKey: opts.key,
+    projectStack: opts._stackProfile || ''
+  });
+
   console.log(chalk.gray(`  Session: ${session.id}`));
   if (opts._transcriptLogger) {
     console.log(chalk.gray(`  Transcript: ${path.relative(projectDir, opts._transcriptLogger.getPath())}`));
@@ -1433,12 +1441,37 @@ ${formatCommandList(customCommands)}
       );
     }
 
-    // Local assistant: pre-select files lien quan qua embedding + Qwen 7B (moi turn)
-    // Isolated theo query — moi cau hoi → context khac, khong lan lan nhau
-    // Chay song song voi buildSystemPrompt de giam latency
+    // === Stage 1: Request analysis (local-classifier 1.5B → fallback cheap) ===
+    // Chạy trước mọi thứ, phân tích intent + routing decision
+    let analysis = null;
+    try {
+      const recentFiles = agent.executor?.filesChanged
+        ? [...agent.executor.filesChanged].slice(-5)
+        : [];
+      analysis = await requestAnalyzer.analyze(expandedInput, { recentFiles });
+      if (analysis && analysis.goal) {
+        console.log(chalk.gray(`  ${formatAnalysisSummary(analysis)}`));
+      }
+    } catch {
+      // analyzer fail → tiếp tục với behavior cũ
+    }
+
+    // === Stage 2: Apply routing decision từ analysis ===
+    if (analysis?.routing) {
+      const targetModel = routingToModel(analysis.routing, opts.model);
+      if (targetModel !== agent.model) {
+        agent.model = targetModel;
+        console.log(chalk.gray(`  → model: ${targetModel} (${analysis.reasoning?.slice(0, 60) || analysis.routing})`));
+      }
+    }
+
+    // === Stage 3: Context retrieval — dùng searchTerms nếu có để tìm kiếm chính xác hơn ===
     let ctxBlockPromise = null;
     if (opts.localAssist !== false && opts._localAssistant) {
-      ctxBlockPromise = opts._localAssistant.buildContextBlock(expandedInput).catch(() => null);
+      const searchTerms = analysis?.searchTerms || [];
+      ctxBlockPromise = opts._localAssistant
+        .buildContextBlock(expandedInput, undefined, searchTerms)
+        .catch(() => null);
     }
 
     // Build system prompt song song voi context search
