@@ -62,7 +62,7 @@ const { AgentBus } = require('../lib/agent-bus');
 const { getRateLimitState } = require('../lib/retry');
 const { getCostTracker } = require('../lib/cost-tracker');
 const { SessionContinuity } = require('../lib/session-continuity');
-const { RequestAnalyzer, routingToModel, formatAnalysisSummary } = require('../lib/request-analyzer');
+const { RequestAnalyzer, formatAnalysisSummary } = require('../lib/request-analyzer');
 
 const BUILTIN_CMDS = [
   'stats', 'files', 'undo', 'sessions', 'resume',
@@ -538,6 +538,13 @@ function createAgent(projectDir, opts) {
     onWriteApproval: (opts.interactive && !approvalState.autoYes)
       ? async (filePath, before, after) => {
           if (spinner) spinner.stop();
+          // Warn nếu file nằm trong scope của decision lock
+          if (opts._hermesBridge) {
+            const blocks = opts._hermesBridge.checkFilePath(filePath);
+            if (blocks.length > 0) {
+              console.log(chalk.yellow(`  🔒 Lock: ${blocks[0].decision.slice(0, 80)}`));
+            }
+          }
           opts._iqRef?.q?.mute();
           try {
             return await askApproval(filePath, before, after, approvalState);
@@ -1240,7 +1247,7 @@ async function interactiveMode(projectDir, opts) {
       if (!opts._hermesBridge) { console.log(chalk.yellow('  Hermes disabled.')); continue; }
       const history = opts._hermesBridge.getRoutingHistory(5);
       if (history.length === 0) {
-        console.log(chalk.gray('  No routing decisions yet. Enable --auto-route to see decisions.'));
+        console.log(chalk.gray('  No routing decisions yet. Run a task to see SmartRouter decisions.'));
       } else {
         console.log(chalk.gray('  Last routing decisions:'));
         for (const h of history) {
@@ -1477,16 +1484,13 @@ ${formatCommandList(customCommands)}
       // analyzer fail → tiếp tục với behavior cũ
     }
 
-    // === Stage 2: Apply routing decision từ analysis ===
-    if (analysis?.routing) {
-      const targetModel = routingToModel(analysis.routing, opts.model);
-      if (targetModel !== agent.model) {
-        agent.model = targetModel;
-        console.log(chalk.gray(`  → model: ${targetModel} (${analysis.reasoning?.slice(0, 60) || analysis.routing})`));
-      }
+    // Feed analysis.changes[] vào HermesBridge để SmartRouter score đúng theo file type
+    // HermesBridge.selectModel() là routing authority — không override agent.model ở đây
+    if (analysis?.changes?.length > 0) {
+      agent.setHintFiles(analysis.changes);
     }
 
-    // === Stage 3: Context retrieval — merge searchTerms + needs[] để tìm kiếm đầy đủ ===
+    // === Stage 2: Context retrieval — merge searchTerms + needs[] để tìm kiếm đầy đủ ===
     let ctxBlockPromise = null;
     if (opts.localAssist !== false && opts._localAssistant) {
       // needs[] = files/symbols LLM xác định cần lookup; searchTerms[] = identifiers cụ thể
