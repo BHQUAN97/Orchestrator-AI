@@ -72,7 +72,7 @@ const BUILTIN_CMDS = [
   'memory', 'team', 'guard', 'route', 'locks',
   'orchestrator', 'orch', 'delegate', 'bg',
   'replay', 'transcripts', 'redo', 'ratelimit', 'rl',
-  'heal', 'healer',
+  'heal', 'healer', 'unlock',
   'exit', 'quit', 'help'
 ];
 
@@ -1293,7 +1293,26 @@ async function interactiveMode(projectDir, opts) {
           console.log(chalk.yellow(`    🔒 [${d.scope}] ${d.decision}`));
           if (d.approvedBy) console.log(chalk.gray(`       by ${d.approvedBy} at ${d.lockedAt}`));
           if (d.relatedFiles?.length) console.log(chalk.gray(`       files: ${d.relatedFiles.slice(0, 3).join(', ')}`));
+          console.log(chalk.gray(`       id: ${d.id}  → /unlock ${d.id} <reason>`));
         }
+      }
+      continue;
+    }
+
+    if (input.startsWith('/unlock ')) {
+      if (!opts._hermesBridge) { console.log(chalk.yellow('  Hermes disabled.')); continue; }
+      const parts = input.slice('/unlock '.length).trim().split(/\s+/);
+      const idOrScope = parts[0];
+      const reason = parts.slice(1).join(' ') || 'manual unlock';
+      if (!idOrScope) { console.log(chalk.yellow('  Usage: /unlock <id|scope> [reason]')); continue; }
+      const res = opts._hermesBridge.unlockDecision(idOrScope, reason);
+      if (res.unlocked > 0) {
+        console.log(chalk.green(`  ✓ Unlocked ${res.unlocked} lock(s) — scope/id: ${idOrScope}`));
+      } else {
+        console.log(chalk.yellow(`  No active lock found for "${idOrScope}". Use /locks to list IDs.`));
+      }
+      if (res.skipped.length > 0) {
+        res.skipped.forEach(s => console.log(chalk.red(`  ✗ ${s}`)));
       }
       continue;
     }
@@ -1414,7 +1433,8 @@ async function interactiveMode(projectDir, opts) {
     /memory [q]       — Memory store (list | search | clear)
     /guard            — Ground truth cua context guard
     /route            — Last routing decisions (SmartRouter/classifier)
-    /locks            — Active decision locks
+    /locks            — Active decision locks (hiện id để /unlock)
+    /unlock <id|scope> [reason] — Unlock decision lock theo id hoặc scope
     /orchestrator     — Check Orchestrator health
     /delegate <task>  — Delegate task to Orchestrator pipeline
     /bg               — List background processes
@@ -1571,10 +1591,22 @@ ${formatCommandList(customCommands)}
     printResult(result);
     printCacheStats(agent);
 
-    // Context guard warnings
+    // Context guard warnings — phân loại severity, critical → đỏ + flag result
     if (agent.contextGuard) {
-      const issues = agent.contextGuard.verify(result.summary || result.final_message || '').issues;
-      if (issues.length > 0) console.log(chalk.yellow(formatIssues(issues)));
+      const guardResult = agent.contextGuard.verify(result.summary || result.final_message || '');
+      if (guardResult.issues.length > 0) {
+        const critical = guardResult.issues.filter(i => i.severity === 'critical' || i.type === 'unverified_claim');
+        const warnings = guardResult.issues.filter(i => !critical.includes(i));
+        if (critical.length > 0) {
+          console.log(chalk.red.bold(`\n  ⚠ Context Guard: ${critical.length} unverified claim(s):`));
+          critical.forEach(i => console.log(chalk.red(`    • ${i.message}`)));
+          // Đánh dấu result là unverified để user biết không trust hoàn toàn
+          result._guardWarning = true;
+        }
+        if (warnings.length > 0) {
+          console.log(chalk.yellow(formatIssues(warnings)));
+        }
+      }
     }
 
     // Lưu session sau mỗi prompt
