@@ -21,24 +21,37 @@ model_list:
       api_key: "os.environ/OPENROUTER_API_KEY"
       rpm: 10
 
-  # smart: Gemini 3 Flash truc tiep (switched tu Claude Sonnet 4.6 — user 2026-04-18)
-  # Neu can premium quality tren anthropic: dung alias "sonnet" (explicit opt-in) hoac "architect" (opus)
+  # smart: Gemini 3 Flash truc tiep (primary) + OpenRouter (fallback tu dong)
   - model_name: "smart"
     litellm_params:
       model: "gemini/gemini-3-flash-preview"
       api_key: "os.environ/GEMINI_API_KEY"
       rpm: 60
 
-  # fast: Gemini 3 Flash Preview truc tiep (pin primary, khong duplicate)
-  # Neu het quota Google, dung model "fast-or" de di OpenRouter
-  # Note: alias "gemini" duoi day tro den cung model — giu cho backward-compat
+  # smart fallback 1: Gemini qua OpenRouter khi Google quota het
+  - model_name: "smart"
+    litellm_params:
+      model: "openai/google/gemini-3-flash-preview"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # fast: Gemini 3 Flash truc tiep (primary)
   - model_name: "fast"
     litellm_params:
       model: "gemini/gemini-3-flash-preview"
       api_key: "os.environ/GEMINI_API_KEY"
       rpm: 60
 
-  # fast-or: Gemini 3 Flash qua OpenRouter (khi Google quota het)
+  # fast fallback: Gemini qua OpenRouter
+  - model_name: "fast"
+    litellm_params:
+      model: "openai/google/gemini-3-flash-preview"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 30
+
+  # fast-or: Gemini 3 Flash qua OpenRouter (explicit alias, giu backward-compat)
   - model_name: "fast-or"
     litellm_params:
       model: "openai/google/gemini-3-flash-preview"
@@ -278,10 +291,18 @@ model_list:
 router_settings:
   routing_strategy: "usage-based-routing-v2"
   enable_pre_call_checks: true
-  allowed_fails: 3
-  cooldown_time: 60
-  num_retries: 2
-  retry_after: 5
+  allowed_fails: 2
+  cooldown_time: 300
+  num_retries: 1
+  retry_after: 2
+  # Auto-fallback khi het rate limit / quota — KHONG hoi lai user
+  # smart/fast: Gemini het → OpenRouter Gemini → cheap (GPT-5.4 Mini)
+  # default: DeepSeek het → cheap
+  fallbacks:
+    - smart: ["fast-or", "cheap"]
+    - fast: ["fast-or", "cheap"]
+    - default: ["cheap"]
+    - gemini: ["fast-or", "cheap"]
 
 # Budget — gioi han $2/ngay (user requirement)
 general_settings:
@@ -294,6 +315,6 @@ litellm_settings:
   cache: true
   cache_params:
     type: "local"
-    ttl: 300
+    ttl: 1800          # 30 phut — khop voi warm-context window
   success_callback: ["db"]
   failure_callback: ["db"]

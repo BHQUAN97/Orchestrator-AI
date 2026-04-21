@@ -181,8 +181,12 @@ async function main() {
     process.exit(0);
   }
 
-  const store = new EmbeddingStore({ projectDir: root });
-  console.log(`[index-examples] embedding via ${store.model} (fallback ${store.fallbackModel})`);
+  const storeOpts = { projectDir: root };
+  // Khi goi tu LocalAssistant: dung LM Studio truc tiep thay vi LiteLLM
+  if (process.env.LMSTUDIO_EMBED_ENDPOINT) storeOpts.endpoint = process.env.LMSTUDIO_EMBED_ENDPOINT;
+  if (process.env.EMBED_MODEL) storeOpts.model = process.env.EMBED_MODEL;
+  const store = new EmbeddingStore(storeOpts);
+  console.log(`[index-examples] embedding via ${store.model} @ ${store.endpoint}`);
 
   const items = [];
   const BATCH = 50;
