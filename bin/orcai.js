@@ -873,10 +873,31 @@ async function interactiveMode(projectDir, opts) {
   const _scHandle = _sc.attachToConversation(null, { sessionId: _scId, snapshotEveryTurns: 5 });
 
   // Request analyzer — phân tích intent + routing trước mỗi prompt
+  // Auto-detect stack từ package.json / requirements.txt để context routing tốt hơn
+  const _detectedStack = (() => {
+    try {
+      const pkgPath = path.join(projectDir, 'package.json');
+      if (require('fs').existsSync(pkgPath)) {
+        const pkg = JSON.parse(require('fs').readFileSync(pkgPath, 'utf8'));
+        const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+        const tags = [];
+        if (deps.includes('next')) tags.push('Next.js');
+        else if (deps.includes('react')) tags.push('React');
+        if (deps.includes('express') || deps.includes('fastify')) tags.push('Node API');
+        if (pkg.type === 'module') tags.push('ESM');
+        return `Node.js${tags.length ? ' / ' + tags.join(', ') : ''}`;
+      }
+    } catch { /* ignore */ }
+    try {
+      if (require('fs').existsSync(path.join(projectDir, 'requirements.txt'))) return 'Python';
+      if (require('fs').existsSync(path.join(projectDir, 'pyproject.toml'))) return 'Python';
+    } catch { /* ignore */ }
+    return '';
+  })();
   const requestAnalyzer = new RequestAnalyzer({
     litellmUrl: opts.url,
     litellmKey: opts.key,
-    projectStack: opts._stackProfile || ''
+    projectStack: opts._stackProfile || _detectedStack
   });
 
   console.log(chalk.gray(`  Session: ${session.id}`));
@@ -1448,7 +1469,7 @@ ${formatCommandList(customCommands)}
       const recentFiles = agent.executor?.filesChanged
         ? [...agent.executor.filesChanged].slice(-5)
         : [];
-      analysis = await requestAnalyzer.analyze(expandedInput, { recentFiles });
+      analysis = await requestAnalyzer.analyze(expandedInput, { recentFiles, conversationTurn: _exchangeCount });
       if (analysis && analysis.goal) {
         console.log(chalk.gray(`  ${formatAnalysisSummary(analysis)}`));
       }
@@ -1465,10 +1486,14 @@ ${formatCommandList(customCommands)}
       }
     }
 
-    // === Stage 3: Context retrieval — dùng searchTerms nếu có để tìm kiếm chính xác hơn ===
+    // === Stage 3: Context retrieval — merge searchTerms + needs[] để tìm kiếm đầy đủ ===
     let ctxBlockPromise = null;
     if (opts.localAssist !== false && opts._localAssistant) {
-      const searchTerms = analysis?.searchTerms || [];
+      // needs[] = files/symbols LLM xác định cần lookup; searchTerms[] = identifiers cụ thể
+      const searchTerms = [
+        ...(analysis?.searchTerms || []),
+        ...(analysis?.needs || [])
+      ].filter((v, i, a) => v && a.indexOf(v) === i).slice(0, 8); // dedup, max 8
       ctxBlockPromise = opts._localAssistant
         .buildContextBlock(expandedInput, undefined, searchTerms)
         .catch(() => null);
