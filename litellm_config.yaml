@@ -303,6 +303,10 @@ router_settings:
     - fast: ["fast-or", "cheap"]
     - default: ["cheap"]
     - gemini: ["fast-or", "cheap"]
+    # Local model fallbacks — khi LM Studio offline thi fallback sang cloud ngay
+    - local-heavy: ["smart", "cheap"]
+    - local-workhorse: ["fast", "cheap"]
+    - local-classifier: ["cheap"]
 
 # Budget — gioi han $2/ngay (user requirement)
 general_settings:

@@ -87,11 +87,11 @@ const MODEL_PROFILES = {
   },
 
   'local': {
-    litellm_name: 'local',
+    litellm_name: 'local-heavy',  // redirect sang model da cau hinh trong litellm_config.yaml
     strengths: ['docs', 'comment', 'simple_fix', 'format', 'rename'],
     weaknesses: ['complex_logic', 'architecture'],
-    max_context: 32000,
-    cost_per_1m_input: 0,  // Free — chay local
+    max_context: 8192,
+    cost_per_1m_input: 0,
     speed: 'slow',
     hallucination: 'high',
     description: 'Local model (LM Studio) — free, offline'

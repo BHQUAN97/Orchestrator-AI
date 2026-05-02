@@ -1490,18 +1490,22 @@ ${formatCommandList(customCommands)}
     }
 
     // === Stage 1: Request analysis (local-classifier 1.5B → fallback cheap) ===
-    // Chạy trước mọi thứ, phân tích intent + routing decision
+    // Hien thi "preparing" ngay lap tuc — tranh man hinh dong im 3-5s cho local-classifier
+    const _prepSpinner = ora({ text: chalk.gray('Preparing...'), spinner: 'dots' }).start();
+
     let analysis = null;
     try {
       const recentFiles = agent.executor?.filesChanged
         ? [...agent.executor.filesChanged].slice(-5)
         : [];
       analysis = await requestAnalyzer.analyze(expandedInput, { recentFiles, conversationTurn: _exchangeCount });
-      if (analysis && analysis.goal) {
-        console.log(chalk.gray(`  ${formatAnalysisSummary(analysis)}`));
-      }
     } catch {
       // analyzer fail → tiếp tục với behavior cũ
+    }
+    _prepSpinner.stop();
+
+    if (analysis?.goal) {
+      console.log(chalk.gray(`  ${formatAnalysisSummary(analysis)}`));
     }
 
     // Feed analysis.changes[] vào HermesBridge để SmartRouter score đúng theo file type
