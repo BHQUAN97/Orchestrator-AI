@@ -1514,9 +1514,12 @@ ${formatCommandList(customCommands)}
       agent.setHintFiles(analysis.changes);
     }
 
-    // === Stage 2: Context retrieval — merge searchTerms + needs[] để tìm kiếm đầy đủ ===
+    // === Stage 2: Context retrieval — skip khi routing='local' ===
+    // Local model (4096 ctx) khong the xu ly 6 files pre-loaded (~18K chars).
+    // Chi inject context cho cloud models.
+    const _skipCtx = analysis?.routing === 'local';
     let ctxBlockPromise = null;
-    if (opts.localAssist !== false && opts._localAssistant) {
+    if (!_skipCtx && opts.localAssist !== false && opts._localAssistant) {
       // needs[] = files/symbols LLM xác định cần lookup; searchTerms[] = identifiers cụ thể
       const searchTerms = [
         ...(analysis?.searchTerms || []),
