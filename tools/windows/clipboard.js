@@ -6,6 +6,24 @@ const { runPowerShell } = require('./ps-bridge');
 const MAX_CLIP = 100 * 1024;
 
 async function readClipboard() {
+  // Kiểm tra xem clipboard có chứa ảnh không
+  const checkImg = await runPowerShell({
+    script: '$ProgressPreference = "SilentlyContinue"; $c = Get-Clipboard -Format Image; if ($c) { "IMAGE" } else { "TEXT" }',
+    timeout: 5000
+  });
+
+  if (checkImg.stdout.trim() === 'IMAGE') {
+    // Lưu ảnh ra file tạm để agent có thể xử lý
+    const tempPath = require('path').join(process.env.TEMP || '.', `clip_${Date.now()}.png`);
+    const saveImg = await runPowerShell({
+      script: `$ProgressPreference = "SilentlyContinue"; $c = Get-Clipboard -Format Image; $c.Save("${tempPath}", [System.Drawing.Imaging.ImageFormat]::Png)`,
+      timeout: 10000
+    });
+    if (saveImg.success) {
+      return { success: true, content: `IMAGE:${tempPath}`, isImage: true };
+    }
+  }
+
   const res = await runPowerShell({
     script: '$ProgressPreference = "SilentlyContinue"; Get-Clipboard -Raw',
     timeout: 10000,

@@ -330,13 +330,38 @@ Warning: "auth.ts found in previous search. Content may be inferred."
 (Note: Chỉ warn, không block — đôi khi đọc lại là cần thiết)
 ```
 
-**Behavior**: Không abort — chỉ inject `[System reminder]` message. Agent còn cơ hội tự điều chỉnh.
+**Behavior khi phát hiện stuck**:
+1. Inject `[System reminder]` vào messages — agent tự điều chỉnh
+2. Nếu agent tiếp tục stuck → **MODEL_ESCALATION**: leo thang model tự động
+
+**MODEL_ESCALATION ladder**:
+
+```
+cheap   → smart
+fast    → smart
+default → smart
+smart   → architect
+architect → architect  (ceiling)
+```
+
+```js
+// Agent loop khi StuckDetector fires:
+const escalated = MODEL_ESCALATION[this.model];
+if (escalated && escalated !== this.model) {
+  this.model = escalated;
+  this.onRouting({ from: prev, to: escalated, decision: { method: 'stuck-escalation' } });
+  this.messages.push({ role: 'user', content:
+    `[System] Stuck detected — escalating model ${prev} → ${escalated}. ${stuckWarning.message}` });
+}
+```
+
+**Log**: `onRouting({ method: 'stuck-escalation' })` — hiển thị trong status line.
 
 ---
 
 ## 7. SelfHealer (`lib/self-healer.js`)
 
-**Vai trò**: Học từ runtime errors — tự động ghi `gotcha`, suggest workaround.
+**Vai trò**: Học từ runtime errors — tự động ghi `gotcha`, suggest workaround **ngay trong session hiện tại**.
 
 ### observe() flow
 
@@ -350,14 +375,19 @@ streakMap['edit_file:{"path":"auth.ts"}'] = {
   firstSeen: timestamp
 }
 
-// count >= 3 → auto-save gotcha:
+// count >= 3 → auto-save gotcha + inject NGAY vào messages[]:
 memoryStore.append({
   type: 'gotcha',
   summary: '[edit_file] pattern not found (3x): "old_string" không tồn tại',
   files_changed: ['auth.ts']
 })
-→ push suggestion: "edit_file failed 3x with pattern not found.
-   Try read_file first to verify exact content before editing."
+
+// Inject suggestion trực tiếp vào messages[] — không chờ session sau:
+this.messages.push({
+  role: 'user',
+  content: '[Self-healer] edit_file failed 3x with pattern not found. ' +
+           'Try read_file first to verify exact content before editing.'
+})
 
 // Khi success sau streak → save recovery pattern:
 memoryStore.append({
@@ -366,6 +396,8 @@ memoryStore.append({
 })
 ```
 
+**Lưu ý**: Suggestion được inject **ngay iteration tiếp theo** trong cùng session — không phải session sau. Agent nhận được hint tức thì.
+
 ### getStats()
 
 ```js
@@ -373,8 +405,7 @@ memoryStore.append({
   observed: 42,           // Tổng lần observe
   gotchas_saved: 3,       // Auto-saved gotchas
   recoveries_saved: 1,    // Recovery patterns saved
-  active_streaks: 2,      // Tool signatures đang trong streak
-  pending_suggestions: 1  // Đang chờ inject vào loop
+  active_streaks: 2       // Tool signatures đang trong streak
 }
 ```
 
@@ -400,7 +431,7 @@ guard.verify("Fixed auth.ts and updated tests")
   issues: [
     {
       type: 'unverified_claim',
-      severity: 'warning',
+      severity: 'critical',
       message: 'Summary mentions "updated tests" but test files not in actualChanges'
     }
   ],
@@ -413,6 +444,15 @@ guard.verify("Fixed auth.ts and updated tests")
 - `unverified_claim`: Summary nói đã sửa X nhưng X không trong actualChanges
 - `file_not_read`: Summary nói đã đọc X nhưng X không trong actualReads
 - `unexecuted_command`: Summary nói đã chạy test nhưng không có execute_command
+
+**Display**: Critical issues (severity=`critical` hoặc type=`unverified_claim`) hiển thị **đỏ đậm** để không bị bỏ qua:
+
+```
+  ⚠ Context Guard: 1 unverified claim(s):
+    • Summary mentions "updated tests" but test files not in actualChanges
+```
+
+**result._guardWarning = true** được set khi có critical issues — upstream code có thể check flag này.
 
 **Behavior**: Không block — chỉ warn sau khi print result. Agent không biết về warn này.
 

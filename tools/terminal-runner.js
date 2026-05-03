@@ -22,6 +22,25 @@ const { spawn } = require('child_process');
 const path = require('path');
 const treeKill = require('tree-kill');
 
+/**
+ * Translate Unix pipe fragments → PowerShell equivalents.
+ * PowerShell đã có alias ls/cat/pwd; chỉ cần fix những gì không có alias.
+ */
+function translateForWindows(command) {
+  return command
+    // head -n N  →  Select-Object -First N
+    .replace(/\|\s*head\s+-n\s+(\d+)/g, '| Select-Object -First $1')
+    .replace(/\|\s*head\s+-(\d+)/g, '| Select-Object -First $1')
+    // tail -n N  →  Select-Object -Last N
+    .replace(/\|\s*tail\s+-n\s+(\d+)/g, '| Select-Object -Last $1')
+    .replace(/\|\s*tail\s+-(\d+)/g, '| Select-Object -Last $1')
+    // wc -l  →  Measure-Object -Line
+    .replace(/\|\s*wc\s+-l/g, '| Measure-Object -Line')
+    // grep [-i] pattern  →  Select-String [-CaseSensitive] pattern
+    .replace(/\|\s*grep\s+-i\s+/g, '| Select-String -CaseSensitive:$false ')
+    .replace(/\|\s*grep\s+/g, '| Select-String ');
+}
+
 // Lệnh bị cấm hoàn toàn — không có cách nào chạy
 // Lưu ý: đây là tuyến phòng thủ cuối, primary defense là system prompt
 const BLOCKED_COMMANDS = [
@@ -223,8 +242,13 @@ class TerminalRunner {
     // 5. Execute
     return new Promise((resolve) => {
       const isWindows = process.platform === 'win32';
-      const shell = isWindows ? 'cmd.exe' : '/bin/bash';
-      const shellArgs = isWindows ? ['/c', command] : ['-c', command];
+      // PowerShell có aliases ls/cat/pwd và hỗ trợ piping tốt hơn cmd.exe.
+      // Translate các Unix pipe fragments phổ biến để agent không cần biết PS syntax.
+      const resolvedCommand = isWindows ? translateForWindows(command) : command;
+      const shell = isWindows ? 'powershell.exe' : '/bin/bash';
+      const shellArgs = isWindows
+        ? ['-NoProfile', '-NonInteractive', '-Command', resolvedCommand]
+        : ['-c', resolvedCommand];
 
       let stdout = '';
       let stderr = '';

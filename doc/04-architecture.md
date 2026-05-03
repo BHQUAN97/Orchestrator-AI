@@ -345,7 +345,15 @@ Lần 2: Thử cách khác (self-correction trong LLM response)
 Lần 3: maxConsecutiveErrors >= 3 → abort, báo cáo
 
 SelfHealer.observe() song song:
-  Cùng lỗi lặp >= 3 lần → auto-save gotcha → inject suggestion
+  Cùng lỗi lặp >= 3 lần → auto-save gotcha
+  → inject suggestion vào messages[] NGAY (cùng session, không chờ session sau)
+  → agent nhận được hint tại iteration tiếp theo
+
+StuckDetector song song:
+  Pattern detect (toggle/repeat/redundant) → MODEL_ESCALATION
+  cheap → smart → architect (leo 1 bậc mỗi lần stuck)
+  → log onRouting({ method: 'stuck-escalation' })
+  → model mạnh hơn có khả năng break pattern
 ```
 
 ### 6.2 LLM Fetch Errors

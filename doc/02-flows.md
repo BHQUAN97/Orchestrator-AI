@@ -93,10 +93,12 @@ AgentLoop.run(systemPrompt, userPrompt)
         │
         ├── interrupt check (Ctrl+C)
         ├── budget.isExceeded() → abort
-        ├── inject SelfHealer suggestion (nếu có pending)
         │
-        ├── _applyRagIfNeeded(messages) → copy enriched
+        ├── _applyRagIfNeeded(messages) → copy enriched (non-mutating)
         │   └── RagPromptBuilder.build() nếu local model / stage role
+        │
+        ├── _sanitizeMessagesForCloud(messages) → redact sensitive content
+        │   └── Chỉ áp dụng cho cloud model; local model nhận raw
         │
         ├── _trimMessages() — TokenManager rolling 80 messages
         │
@@ -122,7 +124,10 @@ AgentLoop.run(systemPrompt, userPrompt)
         │           ├── HookRunner.run('PostToolUse')
         │           ├── Tool result cache store (read-safe tools)
         │           ├── StuckDetector.recordResult() — SAU execute
+        │           ├── [stuck?] MODEL_ESCALATION: cheap→smart→architect
+        │           │   └── onRouting({ method: 'stuck-escalation' })
         │           └── SelfHealer.observe() → auto-gotcha
+        │               └── suggestion → inject vào messages[] NGAY (không chờ iteration sau)
         │
         ├── executor.userAborted? → abort
         ├── task_complete tool? → completed=true
@@ -195,7 +200,8 @@ Khi tool lỗi 3 lần liên tiếp:
 SelfHealer.observe(toolName, args, result)
 → errorStreak >= 3
 → memoryStore.append({ type: 'gotcha', ... })
-→ push suggestion vào _pendingHealerSuggestion
+→ messages.push({ role: 'user', content: '[Self-healer] ...' })
+  ← inject NGAY vào session hiện tại (không phải session sau)
 
 Khi bắt đầu run mới:
 HermesBridge.getRelevantMemories(userPrompt)
@@ -288,6 +294,13 @@ Khi agent chạy:
 → HermesBridge.formatLocksForPrompt()
 → Inject vào system prompt: "[LOCKED] ..."
 → Dev agent tự escalate thay vì override lock
+
+Khi user muốn unlock thủ công:
+→ /locks → hiển thị id của từng lock
+→ /unlock <id|scope> [reason]
+    HermesBridge.unlockDecision(idOrScope, reason)
+    decisionLock.unlock(id, { unlockedBy: 'user', reason })
+    → status = 'unlocked', ghi audit trail
 ```
 
 ---

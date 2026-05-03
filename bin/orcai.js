@@ -33,6 +33,7 @@ const { expandMentions } = require('../lib/mention-expander');
 const { discoverCommands, expandCommand, formatCommandList } = require('../lib/slash-commands');
 const { askApproval, ApprovalState } = require('../tools/diff-approval');
 const { getRegistry } = require('../tools/mcp-client');
+const { setTitle } = require('../lib/terminal-title');
 const { loadInheritedMCPConfig, listAvailableServers } = require('../lib/mcp-auto-config');
 const mcpCmds = (() => { try { return require('../tools/mcp-commands'); } catch { return null; } })();
 const { FsWatcher } = (() => { try { return require('../lib/fs-watcher'); } catch { return {}; } })();
@@ -73,7 +74,8 @@ const BUILTIN_CMDS = [
   'orchestrator', 'orch', 'delegate', 'bg',
   'replay', 'transcripts', 'redo', 'ratelimit', 'rl',
   'heal', 'healer', 'unlock',
-  'exit', 'quit', 'help'
+  'exit', 'quit', 'help',
+  'paste', 'clip'
 ];
 
 // === CLI Setup ===
@@ -158,7 +160,8 @@ program
       return;
     }
 
-    // Banner
+    // Banner + set tab title ngay khi khởi động
+    setTitle('orcai');
     printBanner(projectDir, opts.model, opts.role);
 
     // Worktree isolation: relocate projectDir to worktree path
@@ -456,6 +459,16 @@ ${repoContext}
 BẠN CÓ CÁC TOOLS SAU:
 ${getToolsSummary()}
 
+PLATFORM: Windows ${process.platform === 'win32' ? '(hiện tại)' : '(không phải Windows)'}. Shell: PowerShell.
+Dùng lệnh PowerShell/Windows thay vì Unix bash:
+- Liệt kê file: ls hoặc Get-ChildItem (KHÔNG dùng "dir /b" kiểu cmd)
+- N dòng đầu: ... | Select-Object -First N  (KHÔNG dùng head)
+- N dòng cuối: ... | Select-Object -Last N  (KHÔNG dùng tail)
+- Tìm text: Select-String "pattern" file  (KHÔNG dùng grep)
+- Đếm dòng: (Get-Content file).Count  (KHÔNG dùng wc -l)
+- Xóa file: Remove-Item  (KHÔNG dùng rm)
+- Biến env: $env:VAR  (KHÔNG dùng $VAR hay export)
+
 NGUYÊN TẮC:
 1. LUÔN đọc file trước khi sửa — hiểu code hiện tại
 2. Sửa file bằng edit_file (search & replace) thay vì write_file — tiết kiệm token
@@ -585,6 +598,7 @@ function createAgent(projectDir, opts) {
 
     // Callbacks cho UI
     onThinking: (iter, max) => {
+      setTitle('orcai: thinking...');
       flushText();
       if (spinner) spinner.stop();
       _llmStart = Date.now();
@@ -595,6 +609,7 @@ function createAgent(projectDir, opts) {
     },
 
     onToolCall: (name, args) => {
+      setTitle(`orcai: ${name}`);
       flushText();
       currentTool = name;
       currentArgs = args;
@@ -660,6 +675,7 @@ function createAgent(projectDir, opts) {
     },
 
     onComplete: () => {
+      setTitle('orcai: done');
       flushText();
       if (_llmStart) {
         const ms = Date.now() - _llmStart;
@@ -670,6 +686,7 @@ function createAgent(projectDir, opts) {
     },
 
     onError: (err) => {
+      setTitle('orcai: error');
       if (spinner) spinner.stop();
       console.log(chalk.red(`\n  ✗ ${err}`));
     }
@@ -850,17 +867,39 @@ async function interactiveMode(projectDir, opts) {
         const { EmbeddingStore } = require('../lib/embeddings');
         const lmUrl = process.env.LMSTUDIO_URL || 'http://localhost:1234';
         const embeddings = new EmbeddingStore({ projectDir, endpoint: lmUrl });
-        opts._localAssistant = new LocalAssistant({ projectDir, embeddings, lmUrl });
+        // Spinner dùng chung cho local-assist status messages
+        let _laSpinner = null;
+        const _stopLaSpinner = () => { if (_laSpinner) { _laSpinner.stop(); _laSpinner = null; } };
+
+        opts._localAssistant = new LocalAssistant({
+          projectDir, embeddings, lmUrl,
+          onStatus: (msg, type) => {
+            _stopLaSpinner();
+            if (type === 'rebuild-start') {
+              _laSpinner = ora({ text: chalk.gray(`[local-assist] ${msg}`), spinner: 'dots', stream: process.stderr }).start();
+            } else if (type === 'rebuild-done') {
+              process.stderr.write(chalk.green(`  [local-assist] ✓ ${msg}\n`));
+              _iqRef.q?.redrawPrompt();
+            } else {
+              process.stderr.write(chalk.yellow(`  [local-assist] ⚠ ${msg}\n`));
+              _iqRef.q?.redrawPrompt();
+            }
+          }
+        });
 
         // Bootstrap non-blocking — không delay startup, log khi xong
         opts._localAssistant.isAvailable().then(avail => {
+          _stopLaSpinner();
           if (avail) {
-            console.log(chalk.gray('  🤖 Local assist ready (Qwen 7B + nomic embed)'));
+            process.stderr.write(chalk.gray('  🤖 Local assist ready (Qwen 7B + nomic embed)\n'));
           } else {
-            console.log(chalk.gray('  ℹ Local assist offline — cloud-only mode'));
+            process.stderr.write(chalk.gray('  ℹ Local assist offline — cloud-only mode\n'));
           }
+          _iqRef.q?.redrawPrompt();
         }).catch(() => {
-          console.log(chalk.gray('  ℹ Local assist unavailable — cloud-only mode'));
+          _stopLaSpinner();
+          process.stderr.write(chalk.gray('  ℹ Local assist unavailable — cloud-only mode\n'));
+          _iqRef.q?.redrawPrompt();
         });
       } catch { opts._localAssistant = null; }
     }
@@ -984,6 +1023,7 @@ async function interactiveMode(projectDir, opts) {
           customCommandNames: [...customCommands.keys()],
           builtinCommandNames: BUILTIN_CMDS
         });
+        setTitle('orcai');
         input = await inputQueue.next(chalk.cyan('❯ '));
       } catch {
         break; // Ctrl+C / SIGINT
@@ -1411,6 +1451,44 @@ async function interactiveMode(projectDir, opts) {
       continue;
     }
 
+    if (input === '/paste' || input === '/clip') {
+      if (process.platform !== 'win32') {
+        console.log(chalk.yellow('  /paste chỉ hỗ trợ Windows.'));
+      } else {
+        try {
+          const { readClipboard } = require('../tools/windows/clipboard');
+          const res = await readClipboard();
+          if (!res.success) {
+            console.log(chalk.red(`  Clipboard error: ${res.error}`));
+          } else if (res.isImage) {
+            const imgPath = res.content.replace('IMAGE:', '');
+            console.log(chalk.green(`  📷 Image từ clipboard: ${imgPath}`));
+            console.log(chalk.gray('  Đang gửi ảnh vào conversation...\n'));
+            input = `[Image: ${imgPath}]`;
+            // Fall through → gửi lên agent như prompt thường
+          } else if (res.content) {
+            console.log(chalk.gray(`  📋 Text từ clipboard (${res.content.length} chars):`));
+            console.log(chalk.white('  ' + res.content.slice(0, 200).replace(/\n/g, '\n  ')));
+            if (res.content.length > 200) console.log(chalk.gray('  ...'));
+            console.log(chalk.gray('\n  Nội dung đã paste vào prompt. Thêm text nếu muốn rồi Enter:'));
+            inputQueue.mute();
+            const rlTmp = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+            const extra = await new Promise(r => rlTmp.question(chalk.cyan(`  📋 ${res.content.slice(0, 60)}... `), r));
+            rlTmp.close();
+            inputQueue.unmute();
+            input = res.content + (extra ? '\n' + extra : '');
+            if (!input.trim()) continue;
+          } else {
+            console.log(chalk.gray('  Clipboard trống.'));
+            continue;
+          }
+        } catch (e) {
+          console.log(chalk.red(`  Lỗi đọc clipboard: ${e.message}`));
+          continue;
+        }
+      }
+    }
+
     if (input === '/help') {
       console.log(chalk.gray(`
   Built-in slash commands:
@@ -1443,6 +1521,7 @@ async function interactiveMode(projectDir, opts) {
     /redo             — Re-run last user prompt
     /ratelimit, /rl   — API rate limit state
     /heal, /healer    — Self-healer stats (auto-save gotcha + suggest workaround)
+    /paste, /clip     — Dan anh/van ban tu clipboard (thay the Ctrl+V khi Windows Terminal chan)
     /exit             — Thoat
     /help             — Hien help
 
