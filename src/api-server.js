@@ -683,10 +683,10 @@ const server = http.createServer(async (req, res) => {
 
       const visionPrompt = body.prompt || 'Phan tich anh nay chi tiet.';
       const visionModel = body.model || 'fast';
-      const systemPrompt = `Ban la chuyen gia phan tich hinh anh. Tra loi ngan gon, chinh xac, tieng Viet.
-Neu user dua screenshot UI/code: chi ra van de + de xuat fix cu the.
-Neu diagram/architecture: giai thich + danh gia.
-Neu loi/error: chan doan + cach sua.`;
+      const systemPrompt = `Bạn là OrcAI — chuyên gia phân tích hình ảnh. Trả lời ngắn gọn, chính xác, tiếng Việt.
+Nếu user đưa screenshot UI/code: chỉ ra vấn đề + đề xuất fix cụ thể.
+Nếu diagram/architecture: giải thích + đánh giá.
+Nếu lỗi/error: chẩn đoán + cách sửa.`;
 
       try {
         const start = Date.now();

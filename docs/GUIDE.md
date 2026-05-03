@@ -83,7 +83,7 @@ Route task sang model phu hop (v2.3 lineup):
                            │
                   ┌────────▼────────┐
                   │  LiteLLM Proxy  │
-                  │  (localhost:4001)│
+                  │  (localhost:5002)│
                   │  Track cost     │
                   │  Fallback       │
                   │  Cache          │
@@ -100,7 +100,7 @@ Route task sang model phu hop (v2.3 lineup):
 | Component | File | Chuc nang |
 |---|---|---|
 | LiteLLM Proxy | docker-compose.yaml | API gateway, cost tracking, fallback |
-| Hermes Agent | docker-compose.yaml | Agent engine, memory, web UI |
+| OrcAI CLI | bin/orcai.js | Coding agent CLI (thay the Hermes) |
 | Smart Router | router/smart-router.js | Phan tich task → chon model |
 | Orchestrator Agent | router/orchestrator-agent.js | Chia task lon → nhieu model |
 | Trust Graph | graph/trust-graph.js | Build dependency graph, chon context |
@@ -132,22 +132,19 @@ cp .env.example .env
 Mo `.env` va dien it nhat 1 key:
 
 ```bash
-# Cach 1: OpenRouter (1 key, 200+ models) — KHUYEN NGHI
+# BAT BUOC: OpenRouter (1 key, 200+ models) — KHUYEN NGHI
 OPENROUTER_API_KEY=sk-or-v1-xxx
 
-# Cach 2: Key rieng tung provider
-KIMI_API_KEY=sk-xxx
+# BAT BUOC: Google Gemini (smart/fast tier — truc tiep, re hon OpenRouter)
 GEMINI_API_KEY=AIzaxxx
-DEEPSEEK_API_KEY=sk-xxx
+
+# TUY CHON: Anthropic (khi can Opus cho task cuc kho)
 ANTHROPIC_API_KEY=sk-ant-xxx
 ```
 
 Noi dang ky:
-- OpenRouter: https://openrouter.ai/keys (free tier)
-- Kimi: https://platform.moonshot.cn/console/api-keys
-- Gemini: https://aistudio.google.com/apikey (free tier)
-- DeepSeek: https://platform.deepseek.com/api_keys
-- Anthropic: https://console.anthropic.com/settings/keys
+- OpenRouter: https://openrouter.ai/keys (free tier, co $5 credit)
+- Gemini: https://aistudio.google.com/apikey (free tier, 60 req/phut)
 
 ### Buoc 3: Start
 
@@ -170,11 +167,10 @@ curl http://localhost:5002/v1/chat/completions \
 
 ### Buoc 5: Mo dashboard
 
-- Hermes (Brain): http://localhost:5000
-- WebUI (chat): http://localhost:5001
 - LiteLLM: http://localhost:5002/ui (admin/admin)
 - Orchestrator API: http://localhost:5003
 - Analytics: http://localhost:5004
+- Gateway (login portal): http://localhost:5005
 
 ---
 
@@ -186,19 +182,16 @@ curl http://localhost:5002/v1/chat/completions \
 # Master key dang nhap LiteLLM dashboard
 LITELLM_MASTER_KEY=sk-master-doi-thanh-key-rieng
 
-# Provider keys
+# Provider keys (BAT BUOC: OPENROUTER + GEMINI)
 OPENROUTER_API_KEY=
-KIMI_API_KEY=
-ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
-DEEPSEEK_API_KEY=
+ANTHROPIC_API_KEY=   # TUY CHON: chi can khi dung opus-legacy
 
-# Ports (dai 5000-5009)
-HERMES_PORT=5000
-WEBUI_PORT=5001
+# Ports
 LITELLM_PORT=5002
 ORCHESTRATOR_PORT=5003
 ANALYTICS_PORT=5004
+GATEWAY_PORT=5005
 ```
 
 ### 4.2 Model routing (`litellm_config.yaml`)
@@ -241,31 +234,13 @@ model_list:
 - `fast` — Gemini 3 Flash (scan nhanh, multimodal)
 - `cheap` — GPT-5.4 Mini (docs, comment, cleanup)
 
-### 4.3 Hermes Agent (`hermes_config.yaml`)
-
-```yaml
-provider: custom
-model: default                     # Dung model "default" qua LiteLLM
-api_base: http://litellm:4000/v1   # Goi qua LiteLLM proxy
-
-memory:
-  enabled: true
-  backend: sqlite
-
-context:
-  cache_system_prompt: true        # Cache prompt → giam token
-  compression:
-    enabled: true
-    threshold: 50000               # Compress khi > 50K tokens
-```
-
-### 4.4 Ports
+### 4.3 Ports
 
 Xem `PORTS.md` — moi project co dai rieng:
 
 | Project | Dai |
 |---|---|
-| ai-orchestrator | 5000-5004 |
+| ai-orchestrator | 5002-5005 |
 | VietNet2026 | 5100-5199 |
 | LeQuyDon | 5200-5299 |
 | FashionEcom | 5300-5399 |
@@ -278,7 +253,7 @@ Xem `PORTS.md` — moi project co dai rieng:
 ### 5.1 Goi model truc tiep qua LiteLLM API
 
 ```bash
-# Model default (Kimi K2.5)
+# Model default (DeepSeek V4 Flash)
 curl http://localhost:5002/v1/chat/completions \
   -H "Authorization: Bearer sk-master-change-me" \
   -H "Content-Type: application/json" \
@@ -304,10 +279,7 @@ curl http://localhost:5002/v1/chat/completions \
 ```javascript
 const { SmartRouter } = require('./router/smart-router');
 
-const router = new SmartRouter({
-  availableModels: ['gemini-flash', 'kimi-k2.5', 'deepseek', 'sonnet'],
-  costOptimize: true
-});
+const router = new SmartRouter({ costOptimize: true });
 
 // Tu dong chon model
 const result = router.route({
@@ -317,7 +289,7 @@ const result = router.route({
   project: 'FashionEcom'
 });
 
-console.log(result.model);        // "kimi-k2.5"
+console.log(result.model);        // "deepseek-v4-flash" hoac "local-heavy"
 console.log(result.litellm_name); // "default"
 console.log(result.reasons);      // ["FE files detected", ...]
 ```
@@ -328,9 +300,9 @@ console.log(result.reasons);      // ["FE files detected", ...]
 const { OrchestratorAgent } = require('./router/orchestrator-agent');
 
 const agent = new OrchestratorAgent({
-  litellmUrl: 'http://localhost:4001',
+  litellmUrl: 'http://localhost:5002',
   litellmKey: 'sk-master-change-me',
-  dispatcherModel: 'fast'  // Gemini Flash lam dispatcher (re nhat)
+  dispatcherModel: 'fast'  // Gemini 3 Flash lam dispatcher
 });
 
 // Plan: phan tich va chia viec
@@ -338,7 +310,7 @@ const plan = await agent.plan(
   'Them tinh nang wishlist: API, DB entity, FE component',
   { project: 'FashionEcom', files: ['backend/src/...', 'frontend/src/...'] }
 );
-// → Sonnet (schema) → DeepSeek (BE) → Kimi (FE) → Gemini (review)
+// → DS V4 Pro (schema) → DS V4 Flash (BE) → DS V4 Flash (FE) → Gemini (review)
 
 // Execute: chay tat ca subtasks
 const result = await agent.execute(plan);
@@ -378,11 +350,10 @@ orcai -p /path/to/project "them feature"  # Chi dinh project
 orcai --model smart "refactor auth"       # Chon model
 ```
 
-### 5.6 Hermes Agent (chat qua web)
+### 5.6 OrcAI Gateway (web portal)
 
-Mo http://localhost:5001 → Chat qua Open WebUI.
-Hoac http://localhost:5000 → Hermes dashboard.
-Hermes tu dong goi LiteLLM proxy → chon model.
+Mo http://localhost:5005 → Gateway login portal (admin/admin).
+Truy cap LiteLLM dashboard: http://localhost:5002/ui
 
 ---
 
@@ -528,11 +499,10 @@ User: "Them wishlist feature"
 
 | URL | Chuc nang |
 |---|---|
-| http://localhost:5000 | Hermes Brain (agent engine, memory, dashboard) |
-| http://localhost:5001 | Open WebUI (mobile-friendly chat) |
 | http://localhost:5002/ui | LiteLLM Dashboard (chi tiet token/cost, admin/admin) |
 | http://localhost:5003 | Orchestrator REST API (scan/plan/execute) |
 | http://localhost:5004 | Analytics + Dashboard (overview, cost, models, settings) |
+| http://localhost:5005 | Gateway login portal (admin/admin) |
 
 ### Dashboard tabs
 
@@ -555,17 +525,7 @@ Edit `graph/trust-graph.js` va `graph/index-projects.js`:
 { name: 'NewProject', dir: 'E:/DEVELOP/NewProject' },
 ```
 
-### Buoc 2: Mount vao Docker (neu dung Hermes)
-
-Edit `docker-compose.yaml`, them volume:
-
-```yaml
-hermes:
-  volumes:
-    - /e/DEVELOP/NewProject:/projects/NewProject
-```
-
-### Buoc 3: Them vao watcher
+### Buoc 2: Them vao watcher
 
 Edit `graph/watcher-docker.js`:
 
@@ -683,7 +643,7 @@ command: --config /app/config.yaml --num_workers 4
 
 ```bash
 # Tao key cho team member
-curl http://localhost:4001/key/generate \
+curl http://localhost:5002/key/generate \
   -H "Authorization: Bearer sk-master-change-me" \
   -d '{"max_budget": 10, "budget_duration": "1d"}'
 ```
@@ -714,13 +674,14 @@ curl http://localhost:5002/health -H "Authorization: Bearer sk-master-change-me"
 # Loi 500 → model loi, thu fallback
 ```
 
-### Hermes khong connect LiteLLM
+### OrcAI khong connect LiteLLM
 
 ```bash
-# Trong container (LiteLLM internal port la 4000)
-docker compose exec hermes curl http://litellm:4000/health
+# Test LiteLLM truc tiep (port 5002)
+curl http://localhost:5002/health -H "Authorization: Bearer sk-master-change-me"
 # Neu fail → check docker network
 docker network ls
+docker logs litellm-proxy --tail 20
 ```
 
 ### Trust Graph khong tim du files
@@ -736,12 +697,11 @@ node graph/index-projects.js
 
 | Provider | Free limit |
 |---|---|
-| Gemini | 20 req/ngay (2.5-flash), 0 (2.5-pro) |
-| DeepSeek | Khong gioi han nhung cham |
-| Kimi | 15 req/ngay (free) |
-| OpenRouter | $5 free credit |
+| Gemini 3 Flash | 60 req/phut (Google direct) |
+| OpenRouter | $5 free credit — tat ca model qua 1 key |
+| DeepSeek V4 | Khong gioi han, tra tien theo token |
 
-**Khuyen nghi:** Dang ky OpenRouter ($5 free) de test nhieu model.
+**Khuyen nghi:** Dang ky OpenRouter ($5 free) + Gemini API (free) la du de chay day du.
 
 ### Dashboard khong hien data
 
@@ -759,12 +719,9 @@ ai-orchestrator/
 ├── .env.example                  ← Template
 ├── .gitignore
 ├── package.json                  ← CLI + dependencies
-├── docker-compose.yaml           ← 6 services (port 5000-5004)
-├── docker-compose.agent.yaml     ← Coding agent sandbox
-├── Dockerfile.agent              ← Agent container image
-├── litellm_config.yaml           ← Model routing
-├── hermes_config.yaml            ← Agent config
-├── model-routing-map.md          ← Task → model mapping
+├── docker-compose.yaml           ← Services (LiteLLM, Orchestrator, Analytics, Gateway)
+├── litellm_config.yaml           ← Model routing (v2.3: DS V4 + Gemini 3 Flash)
+├── docs/model-routing-map.md     ← Task → model mapping (source of truth)
 ├── README.md                     ← Quick start
 ├── bin/
 │   └── orcai.js                  ← CLI entry point (`orcai` command)
