@@ -1,6 +1,6 @@
 {
   "name": "ai-orchestrator",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Multi-model AI Coding Agent — plan, execute, verify with tool use",
   "main": "router/orchestrator-agent.js",
   "bin": {

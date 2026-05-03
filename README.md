@@ -4,7 +4,7 @@
 ![tests](https://img.shields.io/badge/tests-533%20passing-brightgreen)
 ![tools](https://img.shields.io/badge/tools-61-blue)
 
-Multi-model AI coding agent system: **Hermes Brain** (memory, learning, self-improve) + **Orchestrator Hands** (scan, plan, route, execute).
+Multi-model AI coding agent system with **persistent memory**, **stage-aware RAG**, and **auto error-recovery** — routes tasks to optimal models for 70-95% cost reduction.
 
 Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks to optimal models: GPT-5.4 Mini (workhorse — fe/be/debug/docs), Gemini 3 Flash (review/dispatch), DeepSeek V4 Pro (architecture). Reduces token cost by 70-95% compared to a single premium model.
 
@@ -13,7 +13,7 @@ Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks
 ```
 User Request (CLI / API / WebUI)
      |
-  OrcAI Agent (memory, RAG, self-correct)
+  OrcAI Agent (persistent memory, stage-aware RAG, auto error-recovery)
      |
   ┌─────────────────────────────────────────┐
   │  Smart Router (single-task path)        │
@@ -83,9 +83,11 @@ Each agent role maps to the most cost-effective model (per `AGENT_ROLE_MAP` in `
 
 **Note:** Claude Sonnet 4.6 removed 2026-04-18; Claude Opus moved to `opus-legacy` (opt-in only) 2026-04-20 — DeepSeek V4 Pro (`architect`) provides comparable quality at 1/5th the cost. For long-context (>400K): use `qwen3-plus` (1M ctx, $0.26/1M). See `docs/MODEL-COMPARISON.md`.
 
-### Hermes Brain + Orchestrator Hands
-- **Hermes** (Brain): memory, vector DB, auto-learn, self-improve — decides WHAT to do
-- **Orchestrator** (Hands): scan, plan, route, execute — decides HOW to do it
+### OrcAI Intelligence Stack
+- **Persistent memory**: lessons appended to `.orcai/memory/lessons.jsonl` — `memory_save` / `memory_recall` tools
+- **Stage-aware RAG**: `rag-prompt-builder.js` auto-injects relevant context for scanner/planner/reviewer/debugger/docs roles
+- **Auto error-recovery**: stuck-detector + max-3 retry loop — escalates to Tech Lead when unable to recover
+- **Orchestrator**: scan, plan, route, execute — splits tasks, assigns models, locks critical decisions
 
 ### Tech Lead Agent
 GPT-5.4 Mini acts as Tech Lead — reviews execution plans before dev agents run:
@@ -281,7 +283,7 @@ ai-orchestrator/
 |   |-- stop.bat              # Stop services (Windows)
 |   +-- cli.sh                # CLI wrapper
 |
-|-- skills/                   # Hermes agent skills
+|-- skills/                   # OrcAI agent skills (slash commands, custom tools)
 |-- docs/                     # Documentation
 |   |-- GUIDE.md              # Full guide
 |   |-- MODEL-COMPARISON.md   # Model comparison
