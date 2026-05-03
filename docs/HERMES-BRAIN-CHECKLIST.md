@@ -8,48 +8,47 @@
 ## Layer 1 — Signal Density (Today)
 *Vấn đề: Brain không có đủ data để học. Memory chỉ có 4 entries, TF-IDF keyword search sai context.*
 
-### 1A — Wire Embeddings vào memory.search()
-- [ ] `lib/memory.js` line 139-150: Thay TF-IDF bằng `EmbeddingStore.search()` (cosine similarity)
-- [ ] Fallback về TF-IDF nếu embedding index chưa có / fail
-- [ ] Lazy-load EmbeddingStore (không block nếu LM Studio offline)
+### 1A — Wire Embeddings vào memory.search() ✅ 2026-05-03
+- [x] `lib/memory.js`: EmbeddingStore.search() via `_getEmbedStore()` lazy-init
+- [x] Fallback về TF-IDF nếu embedding index chưa có / fail
+- [x] Lazy-load EmbeddingStore (không block nếu LM Studio offline)
 
-### 1B — Mở rộng Auto-save Signal Capture
-- [ ] `lib/agent-loop.js` line 363-375: Save lesson cho MỌI task completion (kể cả fail)
-- [ ] `lib/agent-loop.js`: Save `type: 'model_escalation'` khi cheap → smart → architect
-- [ ] `lib/self-healer.js`: Enrich gotcha entry với context (tool chain dẫn đến lỗi)
-- [ ] `lib/agent-loop.js`: Save `type: 'tool_pattern'` khi tool sequence → success
+### 1B — Mở rộng Auto-save Signal Capture ✅ 2026-05-03
+- [x] `lib/agent-loop.js`: Save lesson cho MỌI task completion (kể cả fail)
+- [x] `lib/agent-loop.js`: Save `type: 'model_escalation'` khi cheap → smart → architect
+- [x] `lib/self-healer.js`: Enrich gotcha entry với context (tool chain + error_type)
+- [x] `lib/agent-loop.js`: Save `type: 'tool_pattern'` khi tool sequence → success
 
-### 1C — Outcome Metadata trong mọi Lesson Entry
-- [ ] `lib/memory.js` append(): Thêm fields: `outcome`, `model_used`, `model_final`, `cost_usd`, `confidence`, `helped_count`, `used_count`
-- [ ] `lib/agent-loop.js`: Tính `confidence` = f(iterations, escalation_count, model_level)
-- [ ] `lib/agent-loop.js`: Lấy `cost_usd` từ budgetTracker và ghi vào lesson
+### 1C — Outcome Metadata trong mọi Lesson Entry ✅ 2026-05-03
+- [x] `lib/memory.js` append(): `outcome`, `model_used`, `model_final`, `cost_usd`, `confidence`, `helped_count`, `used_count`, `grade`, `tags`
+- [x] `lib/agent-loop.js`: `_calcConfidence()` = 0.7 − 0.15/escalation − 0.01/iteration_over_10
+- [x] `lib/agent-loop.js`: `cost_usd` từ `this.budget.spentUsd`
 
 ---
 
 ## Layer 2 — Contextual Intelligence (Tuần 2)
 *Vấn đề: Memory recall dump thô vào prompt — noise nhiều hơn signal.*
 
-### 2A — Lesson Confidence Scoring khi Inject
-- [ ] `lib/hermes-bridge.js` line 213-252: Upgrade ranking formula
-  - `rank = (semantic_sim × 0.4) + (helped_ratio × 0.3) + (recency_decay × 0.2) + (model_match × 0.1)`
-  - Chỉ inject entries có `rank > 0.6`
-  - `established_pattern` entries bypass threshold (luôn inject)
+### 2A — Lesson Confidence Scoring khi Inject ✅ 2026-05-03
+- [x] `lib/hermes-bridge.js`: `_rankMemory()` — semantic×0.4 + helped_ratio×0.3 + recency×0.2 + model_match×0.1
+- [x] Chỉ inject entries có `rank > 0.5`; `established_pattern` bypass threshold
+- [x] `formatMemoriesForPrompt()`: hiển thị `grade + score` metadata cho agent
 
-### 2B — Lesson Graduation Mechanic
-- [ ] `lib/memory.js`: Thêm `grade` field: `gotcha → lesson → established_pattern → deprecated`
-- [ ] `lib/memory.js`: Method `promoteGrade(id)`: tự động khi `helped_count >= 5 AND confidence >= 0.85`
-- [ ] `lib/memory.js`: Method `deprecate(id)`: khi conflict detected hoặc 90 ngày không dùng
-- [ ] `lib/memory.js` search(): Filter out `deprecated` entries
+### 2B — Lesson Graduation Mechanic ✅ 2026-05-03
+- [x] `lib/memory.js`: `grade` field — `gotcha → lesson → established_pattern → deprecated`
+- [x] `lib/memory.js`: `promoteGrade(id)` — auto khi `helped_count >= 5 AND confidence >= 0.85`
+- [x] `lib/memory.js`: `deprecate(id, reason)` — manual hoặc conflict detected
+- [x] `lib/memory.js` search(): Filter out `deprecated` / `suspect` entries
 
-### 2C — RAG cho Cloud Models (established_patterns)
-- [ ] `lib/rag-prompt-builder.js` line 87-93: `shouldApplyRag()` — inject `established_pattern` ngay cả cho cloud models
-- [ ] `lib/rag-prompt-builder.js`: Tách 2 loại injection: full RAG (local only) vs. pattern-only (tất cả models)
-- [ ] Pattern injection: ngắn gọn, max 1000 chars, chỉ `established_pattern` grade
+### 2C — RAG cho Cloud Models (established_patterns) ✅ 2026-05-03
+- [x] `lib/rag-prompt-builder.js`: `getRagMode()` — `'full' | 'patterns_only' | 'none'`
+- [x] `getEstablishedPatterns()`: đọc lessons.jsonl, filter grade=established_pattern
+- [x] Cloud execute models: nhận `## Proven Patterns` block thay vì full RAG
 
-### 2D — Model-Specific Memory Tagging
-- [ ] `lib/memory.js` append(): Auto-tag lesson với model hiện tại: `#cheap-success`, `#smart-success`, `#cheap-fail`, etc.
-- [ ] `lib/memory.js` search(): Nhận `modelId` param, ưu tiên lessons có matching model tag
-- [ ] `lib/hermes-bridge.js`: Pass `modelId` vào `getRelevantMemories()` call
+### 2D — Model-Specific Memory Tagging ✅ 2026-05-03
+- [x] `lib/memory.js` append(): auto-tag `#cheap-success`, `#smart-fail`, etc.
+- [x] `lib/memory.js` search(): `modelId` param, boost ×1.2 cho matching model tags
+- [x] `lib/hermes-bridge.js`: Pass `modelId` vào `getRelevantMemories()` + `recordMemoryOutcome()`
 
 ---
 
@@ -92,8 +91,8 @@
 
 ## Tiến độ
 
-- [ ] Layer 1 hoàn thành
-- [ ] Layer 2 hoàn thành
+- [x] Layer 1 hoàn thành (2026-05-03)
+- [x] Layer 2 hoàn thành (2026-05-03)
 - [ ] Layer 3 hoàn thành
-- [ ] Tests pass: `npm run test:all`
-- [ ] Commit + Push
+- [x] Tests pass: `npm run test:all` — 161/161 ✅
+- [x] Commit + Push — `3390c4c`
