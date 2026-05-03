@@ -4,7 +4,8 @@
   "description": "Multi-model AI Coding Agent — plan, execute, verify with tool use",
   "main": "router/orchestrator-agent.js",
   "bin": {
-    "orcai": "./bin/orcai.js"
+    "orcai": "./bin/orcai.js",
+    "orcai-extract": "./bin/orcai-extract-training-data.js"
   },
   "type": "commonjs",
   "files": [
