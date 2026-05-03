@@ -1,18 +1,19 @@
 # ============================================
-# Hermes Agent Config (v2.1 — 2026-04-16)
-# BRAIN: memory, vector DB, auto-learn, self-improve
-# Goi Orchestrator API de execute tasks
+# Hermes Agent Config (v2.2 — 2026-04-18)
+# Updated: Chuyen sang DeepSeek V4 (Flash/Pro) qua LiteLLM
 # ============================================
 
 # Primary: goi qua LiteLLM proxy (port 5002 internal 4000)
 provider: custom
-model: default
+model: default # Trỏ đến DeepSeek V4 Flash trong litellm_config.yaml
 api_base: http://litellm:4000/v1
 
-# Fallback: Gemini truc tiep
+# Fallback: Gemini & DeepSeek V4 Flash (OpenRouter)
 fallback_providers:
   - provider: gemini
     model: gemini-3-flash-preview
+  - provider: openrouter
+    model: deepseek/deepseek-v4-flash
 
 # Orchestrator API — Hermes goi day de execute tasks
 orchestrator:

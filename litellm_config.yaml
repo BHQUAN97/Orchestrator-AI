@@ -5,16 +5,24 @@
 # ============================================
 
 model_list:
-  # ★ default: DeepSeek V3.2 qua OpenRouter (thay Kimi K2.5)
+  # ★ default: DeepSeek V4 Flash — Toi uu toc do & budget (thay V3.2)
   - model_name: "default"
     litellm_params:
-      model: "openai/deepseek/deepseek-v3.2"
+      model: "openai/deepseek/deepseek-v4-flash"
       api_base: "https://openrouter.ai/api/v1"
       api_key: "os.environ/OPENROUTER_API_KEY"
-      rpm: 30
+      rpm: 50
 
-  # ★★ architect: Claude Opus 4.6 — SA, kien truc, task cuc kho
+  # ★★ architect: DeepSeek V4 Pro — Thay the Claude Opus de toi uu budget
   - model_name: "architect"
+    litellm_params:
+      model: "openai/deepseek/deepseek-v4-pro"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      rpm: 20
+
+  # opus-legacy: Claude Opus 4.6 — Chi dung khi thuc su can thiet (dat do)
+  - model_name: "opus-legacy"
     litellm_params:
       model: "openai/anthropic/claude-opus-4-6"
       api_base: "https://openrouter.ai/api/v1"

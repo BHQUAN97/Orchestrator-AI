@@ -56,11 +56,13 @@ node benchmark/scorer.js benchmark/results/2026-04-18-abc.jsonl
 - Budget cap per task (task.budget_usd) + overall session cap
 - Auto-cleanup fixture sau moi run
 
-## Model aliases
+## Model aliases (Updated 2026-04-18)
 
 | Alias | Maps to | Khi nao dung |
 |---|---|---|
-| `default` | Kimi K2.5 | Task thuong, FE-heavy |
-| `cheap` | DeepSeek | Task BE, SQL, API |
-| `smart` | Claude Sonnet | Architecture, multi-file debug |
-| `fast` | Gemini Flash | Review, scan, tom tat |
+| `architect` | DeepSeek V4 Pro | Architecture, task cuc kho, logic phuc tap |
+| `default` | DeepSeek V4 Flash | Task thuong, viet code, toc do cao |
+| `cheap` | GPT-5.4 Mini | Task BE, SQL, API, Review |
+| `smart` | Gemini 3 Flash | Multi-file debug, reasoning nhanh |
+| `fast` | Gemini 3 Flash | Review, scan, tom tat |
+| `opus-legacy`| Claude Opus 4.6 | Du phong khi V4 Pro fail |
