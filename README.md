@@ -6,7 +6,7 @@
 
 Multi-model AI coding agent system: **Hermes Brain** (memory, learning, self-improve) + **Orchestrator Hands** (scan, plan, route, execute).
 
-Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks to optimal models: GPT-5.4 Mini (workhorse — fe/be/debug/docs), Gemini 3 Flash (review/dispatch), Claude Opus 4.6 (architecture — opt-in). Reduces token cost by 70-95% compared to a single premium model.
+Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks to optimal models: GPT-5.4 Mini (workhorse — fe/be/debug/docs), Gemini 3 Flash (review/dispatch), DeepSeek V4 Pro (architecture). Reduces token cost by 70-95% compared to a single premium model.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ Each agent role maps to the most cost-effective model (per `AGENT_ROLE_MAP` in `
 | Agent Role | Model | Cost/1M in/out | Specialty |
 |---|---|---|---|
 | `dispatcher` | Gemini 3 Flash | $0.15 / $0.60 | Task analysis, result synthesis |
-| `architect` | Claude Opus 4.6 | $15 / $75 | System design, kien truc (~2% workload) |
+| `architect` | DeepSeek V4 Pro | ~$2-5 / ~$8-15 | System design, kien truc (~2% workload) |
 | `tech-lead` | GPT-5.4 Mini | $0.15 / $0.60 | Plan review, escalation (100% R-tier pass) |
 | `planner` | GPT-5.4 Mini | $0.15 / $0.60 | Plan generation, stage-RAG auto-inject |
 | `fe-dev` | GPT-5.4 Mini | $0.15 / $0.60 | React, Next.js, Vue, CSS, Tailwind |
@@ -73,7 +73,7 @@ Each agent role maps to the most cost-effective model (per `AGENT_ROLE_MAP` in `
 | `docs` | GPT-5.4 Mini | $0.15 / $0.60 | Documentation, JSDoc, README |
 | `builder` | GPT-5.4 Mini | $0.15 / $0.60 | General implementation (100% A+B pass) |
 
-**Note:** Claude Sonnet 4.6 was removed 2026-04-18 after bench — GPT-5.4 Mini passed 100% R-tier at 1/20th the cost. For premium quality: use `architect` (Opus 4.6). For long-context (>400K): use `qwen3-plus` (1M ctx, $0.26/1M). See `docs/MODEL-COMPARISON.md`.
+**Note:** Claude Sonnet 4.6 removed 2026-04-18; Claude Opus moved to `opus-legacy` (opt-in only) 2026-04-20 — DeepSeek V4 Pro (`architect`) provides comparable quality at 1/5th the cost. For long-context (>400K): use `qwen3-plus` (1M ctx, $0.26/1M). See `docs/MODEL-COMPARISON.md`.
 
 ### Hermes Brain + Orchestrator Hands
 - **Hermes** (Brain): memory, vector DB, auto-learn, self-improve — decides WHAT to do
@@ -188,7 +188,7 @@ node benchmark/runner.js --tier A --model gemini,default,cheap,smart
 node benchmark/scorer.js benchmark/results/<latest>.jsonl
 ```
 
-**Latest result (2026-04-18, 5 A-tier × 4 model)**:
+**Latest result (2026-04-18, 5 A-tier × 4 model — pre-v2.3 lineup)**:
 
 | Model | Pass | % | Avg wall | Notes |
 |---|---|---|---|---|
@@ -206,11 +206,10 @@ ai-orchestrator/
 |-- .env.example              # API keys template (copy to .env)
 |-- .gitignore
 |-- package.json              # CLI + dependencies
-|-- docker-compose.yaml       # 6 services (port range 5000-5004)
+|-- docker-compose.yaml       # Services: LiteLLM, Orchestrator, Analytics, Gateway (5002-5005)
 |-- docker-compose.agent.yaml # Coding agent sandbox (optional)
 |-- Dockerfile.agent          # Agent container image
-|-- litellm_config.yaml       # Model routing + fallback + budget
-|-- hermes_config.yaml        # Hermes agent config
+|-- litellm_config.yaml       # Model routing + fallback + budget (v2.3: DS V4 + Gemini 3 Flash)
 |
 |-- bin/                      # CLI entry point
 |   +-- orcai.js              # `orcai` command
@@ -340,8 +339,6 @@ You need at least ONE provider key. **OpenRouter** is recommended (1 key = 200+ 
 
 | Service | Port | URL | Description |
 |---|---|---|---|
-| Hermes (Brain) | 5000 | http://localhost:5000 | Agent engine + memory |
-| WebUI | 5001 | http://localhost:5001 | Open WebUI chat interface |
 | LiteLLM Gateway | 5002 | http://localhost:5002 | API gateway + model routing |
 | Orchestrator API | 5003 | http://localhost:5003 | REST API (scan/plan/execute) |
 | Analytics Dashboard | 5004 | http://localhost:5004 | Cost tracking + monitoring |
@@ -469,7 +466,7 @@ curl http://localhost:5002/v1/chat/completions \
   }'
 ```
 
-Model aliases (see `litellm_config.yaml`): `default` (DeepSeek V3.2), `cheap`/`gpt-mini` (GPT-5.4 Mini — workhorse), `fast`/`smart`/`gemini` (Gemini 3 Flash), `architect`/`opus` (Claude Opus 4.6), `qwen3-plus` (1M ctx), `qwen3-coder-flash`, `qwen3-max`. Free tier: `free-qwen`, `free-llama`, `free-glm`, `free-minimax`, `free-gpt-oss`. Local (LM Studio): `local-classifier`, `local-workhorse`, `local-heavy`, `local-embed`.
+Model aliases (see `litellm_config.yaml`): `default` (DeepSeek V4 Flash), `cheap`/`gpt-mini` (GPT-5.4 Mini — workhorse), `fast`/`smart`/`gemini` (Gemini 3 Flash), `architect` (DeepSeek V4 Pro), `opus-legacy` (Claude Opus 4.6 — opt-in only), `qwen3-plus` (1M ctx), `qwen3-coder-flash`, `qwen3-max`. Free tier: `free-qwen`, `free-llama`, `free-glm`, `free-minimax`, `free-gpt-oss`. Local (LM Studio): `local-classifier`, `local-workhorse`, `local-heavy`, `local-embed`.
 
 ### Coding Agent Sandbox (Docker)
 
@@ -509,19 +506,20 @@ The router scores each model based on 5 factors:
 ### Fallback chain (automatic via LiteLLM)
 
 ```
-default:    DeepSeek V3.2 (OpenRouter)
-cheap:      GPT-5.4 Mini (OpenRouter)           ← workhorse alias
-gpt-mini:   GPT-5.4 Mini (OpenRouter)           ← backward-compat alias of cheap
-fast:       Gemini 3 Flash (Google direct)      ← pin primary
-smart:      Gemini 3 Flash (Google direct)      ← retargeted 2026-04-18 (was Sonnet)
-gemini:     Gemini 3 Flash (Google direct)      ← backward-compat alias of fast
-fast-or:    Gemini 3 Flash (OpenRouter)         ← use when Google quota exhausted
-architect:  Claude Opus 4.6 (OpenRouter)        ← SA / design only
-opus:       Claude Opus 4.6 (OpenRouter)        ← backward-compat alias of architect
-qwen3-plus: Qwen 3.5 Plus (OpenRouter, 1M ctx)
+default:      DeepSeek V4 Flash (OpenRouter)
+cheap:        GPT-5.4 Mini (OpenRouter)           ← workhorse alias
+gpt-mini:     GPT-5.4 Mini (OpenRouter)           ← backward-compat alias of cheap
+fast:         Gemini 3 Flash (Google direct)      ← pin primary
+smart:        Gemini 3 Flash (Google direct)      ← retargeted 2026-04-18 (was Sonnet)
+gemini:       Gemini 3 Flash (Google direct)      ← backward-compat alias of fast
+fast-or:      Gemini 3 Flash (OpenRouter)         ← use when Google quota exhausted
+architect:    DeepSeek V4 Pro (OpenRouter)        ← SA / design only (v2.3, was Opus)
+opus-legacy:  Claude Opus 4.6 (OpenRouter)        ← opt-in only, expensive
+qwen3-plus:   Qwen 3.5 Plus (OpenRouter, 1M ctx)
 ```
 
-**Removed 2026-04-18:** `sonnet` alias (Claude Sonnet 4.6) — replaced by `cheap` for reasoning/review, `architect` for deep design. Rationale logged in `litellm_config.yaml`.
+**Removed 2026-04-18:** `sonnet` alias (Claude Sonnet 4.6) — replaced by `cheap` for reasoning/review.
+**Changed 2026-04-20:** `architect` retargeted from Opus 4.6 → DeepSeek V4 Pro (comparable quality, ~1/5 cost). Opus available via `opus-legacy`.
 
 ## Configuration
 
