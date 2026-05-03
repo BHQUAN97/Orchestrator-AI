@@ -42,9 +42,9 @@ const LITELLM_KEY = process.env.LITELLM_KEY || 'sk-master-change-me';
 //
 // Quyet dinh: cheap DOMINATES ca code gen + reasoning. qwen3-plus giu trong
 // config nhu explicit opt-in (khi that su can 1M ctx > 400K, hiem).
-// architect (Opus) chi khi SA/design cuc kho (~2% workload).
+// architect (DeepSeek V4 Pro) chi khi SA/design cuc kho (~2% workload).
 const AGENT_ROLE_MAP = {
-  'architect':  'architect', // Claude Opus 4.6 — SA, system design, task cuc kho (2% workload)
+  'architect':  'architect', // DeepSeek V4 Pro — SA, system design, task cuc kho (2% workload)
   'tech-lead':  'cheap',     // GPT-5.4 Mini — review/reasoning, 100% R-tier pass
   'planner':    'cheap',     // GPT-5.4 Mini — plan, 100% A+B+R pass, stage-RAG tu dong inject
   'fe-dev':     'cheap',     // GPT-5.4 Mini — 100% pass, re nhat

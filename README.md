@@ -13,11 +13,18 @@ Includes `orcai` CLI — a coding agent similar to Claude Code that routes tasks
 ```
 User Request (CLI / API / WebUI)
      |
-  Hermes (Brain) — memory, learning, self-improve
+  OrcAI Agent (memory, RAG, self-correct)
      |
-  Orchestrator (Hands) — scan → plan → route → execute
-     |
-  Dispatcher (Gemini 3 Flash — direct Google quota)
+  ┌─────────────────────────────────────────┐
+  │  Smart Router (single-task path)        │
+  │  → default (DS V4 Flash)  — build/fix   │
+  │  → cheap   (GPT-5.4 Mini) — docs/simple │
+  │  → fast    (Gemini Flash) — review/scan │
+  │  → local   (Qwen 7B)      — offline     │
+  └──────────────┬──────────────────────────┘
+                 │ (multi-task / orchestrated path)
+                 v
+  Dispatcher (Gemini 3 Flash) — analyze, split subtasks
      |
      v
   Execution Plan (subtasks + model assignment)
@@ -28,16 +35,17 @@ User Request (CLI / API / WebUI)
   Context Manager ← normalize context to structured JSON
      |               every model receives the SAME context
      v
-  +----------+----------+----------+
-  |          |          |          |
-FE Dev    BE Dev    Reviewer   Debugger
-(GPT-mini)(GPT-mini)(Gemini)  (GPT-mini)
-  |          |          |          |
-  +----------+----------+----------+
+  +----------+----------+----------+----------+
+  |          |          |          |          |
+Scanner   FE Dev    BE Dev    Reviewer   Debugger
+(GPT-mini)(GPT-mini)(GPT-mini)(Gemini)  (GPT-mini)
+  +----------+----------+----------+----------+
      |
   Decision Lock ← lock API contracts, DB schemas, auth flows
-     |              agents cannot override locked decisions
-     v
+     |
+  Escalation chain (auto, when agent stuck):
+  cheap → default (DS V4 Flash) → smart (Gemini) → architect (DS V4 Pro)
+     |
   Synthesizer (Gemini 3 Flash) ← merge all results
      |
      v
