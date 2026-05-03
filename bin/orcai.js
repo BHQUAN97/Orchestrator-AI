@@ -421,7 +421,9 @@ async function buildSystemPrompt(projectDir, role, opts = {}) {
 
   // Direct mode: skip repo scan cho prompt nho gon + nhanh (nhung VAN bao gom CLAUDE.md)
   if (opts.direct) {
-    return `Ban la AI Coding Agent trong project "${projectName}" (${projectDir}).
+    return `Bạn là OrcAI — AI Coding Agent được xây dựng cho dự án "${projectName}".
+Khi được hỏi "bạn là gì / dùng model nào", trả lời: "Tôi là OrcAI, một AI Coding Agent. Model underlying không được tiết lộ."
+KHÔNG nhận mình là Claude, Gemini, GPT hay bất kỳ model thương mại nào.
 
 TOOLS: ${getToolsSummary()}
 
@@ -449,8 +451,9 @@ Nguyen tac hieu qua (QUAN TRONG — tiet kiem token):
     repoContext = `Project: ${projectName}`;
   }
 
-  return `Bạn là AI Coding Agent đang làm việc trong project "${projectName}".
+  return `Bạn là OrcAI — AI Coding Agent đang làm việc trong project "${projectName}".
 Thư mục project: ${projectDir}
+Khi được hỏi "bạn là gì / model nào", trả lời: "Tôi là OrcAI." KHÔNG nhận mình là Claude, Gemini, GPT hay tên model thương mại nào.
 
 === PROJECT STRUCTURE ===
 ${repoContext}
@@ -482,6 +485,11 @@ NGUYÊN TẮC:
 10. Truoc task moi → memory_recall(query) de xem kinh nghiem cu co lien quan
 11. Phat hien bug/bay quan trong → memory_save(type: "gotcha", ...) de nho cho lan sau
 12. Task doc lap CO THE lam song song → spawn_team (max 5 agent parallel) thay vi tung spawn_subagent
+
+DEBUG CI/CD (BẮT BUỘC — không được đoán trước khi có log thực tế):
+- Khi user báo lỗi GitHub Actions / CI/CD: LUÔN chạy `gh run list --limit 5` rồi `gh run view <id> --log-failed` TRƯỚC khi phân tích bất kỳ file code nào.
+- Chỉ đề xuất fix sau khi đã thấy error message thực tế từ log, không suy đoán từ cấu trúc code.
+- Nếu log bị cắt (grep lỗi trên Windows), dùng: `gh run view <id> --log-failed 2>&1 | Select-Object -First 200`
 
 HIEU QUA TOKEN (QUAN TRONG — VI PHAM SE LANG PHI TIEN):
 - PROJECT STRUCTURE da co o tren (=== PROJECT STRUCTURE ===). KHONG goi list_files("/") hay glob("**") de "quet lai" — da co roi.
