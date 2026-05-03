@@ -1,19 +1,19 @@
 # Model Routing Map — Agent Task → Model
 
-> Hermes goi model qua LiteLLM proxy.
+> OrcAI goi model qua LiteLLM proxy.
 > LiteLLM tu dong route + fallback + track cost.
-> Updated: 2026-04-16 — Upgrade model lineup v2
+> Updated: 2026-05-03 — v2.3 lineup (DeepSeek V4 + Gemini 3 Flash)
 
-## Execution Flow (v2.1)
+## Execution Flow (v2.3)
 
 ```
 User Request
     ↓
 [1] Scanner (cheap/GPT-5.4 Mini) → quet project, doc file, thu thap context
     ↓
-[2] Planner (default/DeepSeek V3.2) → xay dung plan tu scan data thuc te
+[2] Planner (default/DeepSeek V4 Flash) → xay dung plan tu scan data thuc te
     ↓
-[3] Tech Lead (smart/Sonnet 4.6) → review plan, approve/modify/reject
+[3] Tech Lead (smart/Gemini 3 Flash) → review plan, approve/modify/reject
     ↓
 [4] Execute → dev agents chay song song
     ↓ (neu gap kho)
@@ -27,16 +27,16 @@ User Request
 | Agent Role | Task Type | LiteLLM Model Name | Primary Model | Ly do |
 |---|---|---|---|---|
 | scanner | scan | **cheap** | GPT-5.4 Mini | Quet project, thu thap context. RE. |
-| planner | plan | **default** | DeepSeek V3.2 | Xay dung plan tu scan data. GIA VUA. |
-| architect | design | **architect** | Claude Opus 4.6 | SA — thiet ke kien truc he thong |
-| escalation | escalation | **architect** | Claude Opus 4.6 | Smart gap kho → escalate len Opus |
-| tech-lead | review | **smart** | Claude Sonnet 4.6 | Review plan, handle escalation |
-| debugger | debug_complex | **smart** | Claude Sonnet 4.6 | Trace across layers, khong bua |
-| `/spec` | spec | **smart** | Claude Sonnet 4.6 | It ao giac, reasoning sau |
-| `/build` | build | **default** | DeepSeek V3.2 | Code gen manh, gia re, it drift |
-| `/task` | task_single | **default** | DeepSeek V3.2 | Task don le, ro rang |
-| `/fix` | fix | **default** | DeepSeek V3.2 | Bug fix — logic tot |
-| `/plan` | plan | **default** | DeepSeek V3.2 | Planning nhanh |
+| planner | plan | **default** | DeepSeek V4 Flash | Xay dung plan tu scan data. GIA VUA. |
+| architect | design | **architect** | DeepSeek V4 Pro | SA — thiet ke kien truc he thong |
+| escalation | escalation | **architect** | DeepSeek V4 Pro | Smart gap kho → escalate len Pro |
+| tech-lead | review | **smart** | Gemini 3 Flash | Review plan, reasoning nhanh |
+| debugger | debug_complex | **smart** | Gemini 3 Flash | Trace across layers, context lon |
+| `/spec` | spec | **smart** | Gemini 3 Flash | It ao giac, reasoning sau |
+| `/build` | build | **default** | DeepSeek V4 Flash | Code gen manh, gia re, it drift |
+| `/task` | task_single | **default** | DeepSeek V4 Flash | Task don le, ro rang |
+| `/fix` | fix | **default** | DeepSeek V4 Flash | Bug fix — logic tot |
+| `/plan` | plan | **default** | DeepSeek V4 Flash | Planning nhanh |
 | `/check` | review | **fast** | Gemini 3 Flash | Pattern scan nhanh |
 | `/review` | review | **fast** | Gemini 3 Flash | Code review |
 | `/security` | security | **fast** | Gemini 3 Flash | OWASP scan |
@@ -44,16 +44,20 @@ User Request
 | `/cleanup` | cleanup | **cheap** | GPT-5.4 Mini | Don gian, it bua hon model re |
 | `/docs` | docs | **cheap** | GPT-5.4 Mini | Text generation chinh xac |
 | `/wire-memory` | wire | **cheap** | GPT-5.4 Mini | Tong hop text |
-| `/perf` | perf | **default** | DeepSeek V3.2 | Profiling + fix |
+| `/perf` | perf | **default** | DeepSeek V4 Flash | Profiling + fix |
+
+> **Khi can Opus:** Dung `--model opus-legacy` tuong minh. Opus 4.6 khong duoc tu dong routing
+> vi chi phi ($15/1M) qua cao so voi V4 Pro ($2-5/1M).
 
 ## Fallback Chain (tu dong boi LiteLLM)
 
 ```
-architect: Opus 4.6 → Sonnet 4.6
-smart:     Sonnet 4.6 → DeepSeek V3.2
-default:   DeepSeek V3.2 → Kimi K2.5 (legacy)
-fast:      Gemini 3 Flash (direct) → Gemini 3 Flash (OpenRouter)
-cheap:     GPT-5.4 Mini → Gemini 3 Flash
+architect: DeepSeek V4 Pro (OpenRouter)
+smart:     Gemini 3 Flash (Google direct) → Gemini 3 Flash (OpenRouter)
+default:   DeepSeek V4 Flash (OpenRouter)
+fast:      Gemini 3 Flash (Google direct) → Gemini 3 Flash (OpenRouter)
+cheap:     GPT-5.4 Mini (OpenRouter)
+opus-legacy: Claude Opus 4.6 (OpenRouter) — chi dung khi goi tuong minh
 ```
 
 ## Escalation Flow
@@ -61,105 +65,51 @@ cheap:     GPT-5.4 Mini → Gemini 3 Flash
 ```
 cheap → default → smart → architect
   ↑        ↑         ↑         ↑
-GPT Mini  DS V3.2  Sonnet   Opus 4.6
-  $0.20    $0.30    $3.00    $15.00
+GPT Mini  DS V4 Flash  Gemini  DS V4 Pro
+  $0.20    ~$0.50     $0.15    ~$2-5
 
 Khi model tier thap gap kho (confidence < 0.6, error loop, hoac
 user request) → tu dong escalate len tier cao hon.
-architect (Opus) la tier cao nhat — khong escalate tiep.
+architect (V4 Pro) la tier cao nhat — khong escalate tiep.
 ```
 
 ## Cost Estimates (per 1M tokens)
 
 | Model Name | Provider | Input | Output | Hallucination |
 |---|---|---|---|---|
-| architect (Opus 4.6) | Anthropic | $15.00 | $75.00 | Rat thap |
-| smart (Sonnet 4.6) | Anthropic | $3.00 | $15.00 | Rat thap |
-| default (DeepSeek V3.2) | DeepSeek | $0.30 | $1.20 | Thap-TB |
-| fast (Gemini 3 Flash) | Google | $0.15 | $0.60 | Trung binh |
-| cheap (GPT-5.4 Mini) | OpenAI | $0.20 | $0.80 | TB |
+| architect (DeepSeek V4 Pro) | OpenRouter | ~$2-5 | ~$8-15 | Thap |
+| smart/fast (Gemini 3 Flash) | Google/OpenRouter | $0.15 | $0.60 | Trung binh |
+| default (DeepSeek V4 Flash) | OpenRouter | ~$0.30-0.50 | ~$1.20 | Thap-TB |
+| cheap (GPT-5.4 Mini) | OpenRouter | $0.20 | $0.80 | TB |
+| opus-legacy (Claude Opus 4.6) | OpenRouter | $15.00 | $75.00 | Rat thap |
 
-## So sanh chi phi: v1 vs v2
+## Goi model cu the trong OrcAI
 
-### Model lineup
-
-| Tier | v1 (cu) | v2 (moi) | Ly do upgrade |
-|---|---|---|---|
-| architect | *(khong co)* | Opus 4.6 | MOI — SA tier, task cuc kho |
-| smart | Sonnet 4 ($3/$15) | Sonnet 4.6 ($3/$15) | Upgrade nhe, it ao giac hon |
-| default | Kimi K2.5 ($1/$4) | DeepSeek V3.2 ($0.30/$1.20) | **Re hon 3x**, code tot hon, it bua |
-| fast | Gemini 2.5 Flash ($0.15/$0.60) | Gemini 3 Flash ($0.15/$0.60) | Gia tuong duong, model moi hon |
-| cheap | DeepSeek v3-0324 ($0.27/$1.10) | GPT-5.4 Mini ($0.20/$0.80) | Re hon, it bua hon |
-
-### Uoc tinh chi phi ngay (100 request/ngay)
-
-| Scenario | v1 (cu) | v2 (moi) | Chenh lech |
-|---|---|---|---|
-| 60 default requests (avg 2K in + 4K out tokens) | $0.60 | **$0.32** | -47% ↓ |
-| 20 fast requests (avg 5K in + 1K out tokens) | $0.03 | $0.03 | 0% |
-| 15 smart requests (avg 3K in + 3K out tokens) | $0.20 | $0.20 | 0% |
-| 5 cheap requests (avg 1K in + 2K out tokens) | $0.01 | $0.01 | 0% |
-| 2 architect requests (avg 5K in + 5K out tokens) | $0.00 | **$0.53** | +$0.53 ↑ |
-| **TONG/NGAY** | **$0.84** | **$1.09** | **+$0.25 (+30%)** |
-| **TONG/THANG (30 ngay)** | **$25.20** | **$32.70** | **+$7.50** |
-
-### Budget cap: $2/ngay (CUNG)
-
-Orchestrator co budget guard tu dong:
-- Truoc moi API call → check con du budget khong
-- Neu khong du → **tu dong downgrade** model: architect → smart → default → fast → cheap
-- Neu het sach → throw error, dung lai
-- Reset moi ngay 00:00
-
-### Uoc tinh so request trong $2/ngay
-
-| Model | Cost/req (avg 3K tokens) | Max requests/ngay |
-|---|---|---|
-| architect (Opus) | ~$0.135 | ~14 |
-| smart (Sonnet) | ~$0.027 | ~74 |
-| default (DeepSeek) | ~$0.002 | ~1000 |
-| fast (Gemini) | ~$0.001 | ~2000 |
-| cheap (GPT Mini) | ~$0.0015 | ~1300 |
-
-### Mix thuc te (trong $2/ngay)
-
-| Scenario | architect | smart | default | fast | cheap | Tong |
-|---|---|---|---|---|---|---|
-| Heavy build | 1 | 5 | 40 | 15 | 10 | ~$0.45 |
-| Complex debug | 2 | 10 | 20 | 10 | 5 | ~$0.65 |
-| System design | 3 | 8 | 15 | 10 | 5 | ~$0.73 |
-| Max day | 5 | 15 | 60 | 20 | 20 | ~$1.40 |
-
-**$2/ngay thoai mai cho 99% use cases.** Chi vuot khi spam architect (>14 req/ngay).
-
-## Goi model cu the trong Hermes
-
-Hermes goi qua LiteLLM proxy:
 ```bash
-# Dung model architect (Opus 4.6) cho thiet ke kien truc
-hermes "thiet ke microservice architecture" --model architect
+# Dung model architect (DeepSeek V4 Pro) cho thiet ke kien truc
+orcai "thiet ke microservice architecture" --model architect
 
-# Dung model smart (Sonnet 4.6) cho spec/debug
-hermes "thiet ke auth module" --model smart
+# Dung model smart (Gemini 3 Flash) cho spec/debug
+orcai "thiet ke auth module" --model smart
 
-# Dung model default (DeepSeek V3.2) cho build/fix
-hermes "fix bug upload" --model default
+# Dung model default (DeepSeek V4 Flash) cho build/fix
+orcai "fix bug upload" --model default
 
 # Dung model fast (Gemini 3 Flash) cho review
-hermes "review file src/auth" --model fast
+orcai "review file src/auth" --model fast
 
 # Dung model cheap (GPT-5.4 Mini) cho docs
-hermes "viet JSDoc cho utils/" --model cheap
+orcai "viet JSDoc cho utils/" --model cheap
+
+# Dung Opus khi thuc su can (dat — yeu cau tuong minh)
+orcai "audit toan bo kien truc he thong" --model opus-legacy
 ```
 
-## Trong Claude Code — goi LiteLLM cho task nhe
-
-Claude Code van dung Opus cho task chinh.
-Nhung co the delegate task nhe qua LiteLLM:
+## LiteLLM API truc tiep
 
 ```bash
-# Goi truc tiep LiteLLM API
-curl http://localhost:4001/v1/chat/completions \
+# LiteLLM port: 5002 (khong phai 4001)
+curl http://localhost:5002/v1/chat/completions \
   -H "Authorization: Bearer sk-master-change-me" \
   -H "Content-Type: application/json" \
   -d '{

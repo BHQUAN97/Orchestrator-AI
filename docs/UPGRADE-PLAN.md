@@ -1,4 +1,10 @@
-# Upgrade Plan — Cai tien luong hien tai
+# Upgrade Plan — LEGACY (v1 → v2)
+
+> **[OUTDATED — 2026-05-03]** Tài liệu này mô tả quá trình nâng cấp từ v1 lên v2.
+> Model lineup hiện tại (v2.3): xem `docs/model-routing-map.md`.
+> Tài liệu này giữ lại để tham khảo lịch sử — KHÔNG phản ánh cấu hình production.
+
+---
 
 > Khong thay the Claude Code. Toi uu hoa chi phi bang cach chon dung model cho dung viec.
 

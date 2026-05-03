@@ -1,7 +1,7 @@
-# AI Orchestrator v2.1 — Huong dan day du
+# OrcAI v2.3 — Huong dan day du
 
-> Hermes Brain + Orchestrator Hands: multi-model coding agent system.
-> Route task sang model phu hop, tiet kiem chi phi 70-95%.
+> Multi-model coding agent system — route task sang model phu hop.
+> Updated: 2026-05-03 — v2.3 lineup (DeepSeek V4 + Gemini 3 Flash)
 > Dung ket hop voi Claude Code — KHONG thay the.
 
 ---
@@ -33,12 +33,13 @@
 - Khi co 5-10 projects, chi phi tang nhanh
 
 ### Giai phap
-Route task sang model phu hop:
+Route task sang model phu hop (v2.3 lineup):
 - **Claude Code (Opus)**: Spec, debug phuc tap, build multi-file → giu nguyen
-- **Kimi K2.5**: Code frontend (React, Vue, CSS) → re hon 10x
-- **DeepSeek**: Code backend (NestJS, API, DB) → re hon 30x
-- **Gemini Flash**: Review, scan, analyze → re hon 60x
-- **Local (LM Studio)**: Docs, comment → mien phi
+- **DeepSeek V4 Pro** (`architect`): Kien truc phuc tap, system design
+- **DeepSeek V4 Flash** (`default`): Build, fix, task → re, manh
+- **Gemini 3 Flash** (`smart`/`fast`): Review, scan, spec, debug → nhanh
+- **GPT-5.4 Mini** (`cheap`): Docs, cleanup, wire-memory → re nhat
+- **Local (LM Studio/Qwen 7B)**: Offline, private code → mien phi
 
 ### Khi nao dung AI Orchestrator vs Claude Code
 
@@ -90,8 +91,8 @@ Route task sang model phu hop:
                            │
           ┌────────┬───────┼────────┬──────────┐
           │        │       │        │          │
-      Kimi K2.5  Sonnet  Gemini  DeepSeek   Local
-       (FE)      (arch)  (review) (BE)     (docs)
+      DS V4 Pro  Gemini  Gemini  DS V4 Flash  Local
+      (architect)(smart) (fast)  (default)  (Qwen7B)
 ```
 
 ### Components
@@ -204,36 +205,41 @@ ANALYTICS_PORT=5004
 
 ```yaml
 model_list:
-  # model_name la ten ban goi trong API
-  # model la ten thuc cua provider
-  - model_name: "default"         # Goi: model="default"
+  - model_name: "default"         # Build, fix, task
     litellm_params:
-      model: "openai/kimi-k2.5"   # Provider/model thuc
-      api_base: "https://api.moonshot.cn/v1"
-      api_key: "os.environ/KIMI_API_KEY"
+      model: "openai/deepseek/deepseek-v4-flash"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
 
-  - model_name: "smart"
+  - model_name: "architect"       # System design, kien truc phuc tap
     litellm_params:
-      model: "anthropic/claude-sonnet-4-20250514"
-      api_key: "os.environ/ANTHROPIC_API_KEY"
+      model: "openai/deepseek/deepseek-v4-pro"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
 
-  - model_name: "fast"
+  - model_name: "smart"           # Review, spec, debug
     litellm_params:
-      model: "gemini/gemini-2.5-flash"
+      model: "gemini/gemini-3-flash-preview"
       api_key: "os.environ/GEMINI_API_KEY"
 
-  - model_name: "cheap"
+  - model_name: "fast"            # Scan, analyze, multimodal
     litellm_params:
-      model: "deepseek/deepseek-chat"
-      api_base: "https://api.deepseek.com/v1"
-      api_key: "os.environ/DEEPSEEK_API_KEY"
+      model: "gemini/gemini-3-flash-preview"
+      api_key: "os.environ/GEMINI_API_KEY"
+
+  - model_name: "cheap"           # Docs, cleanup, wire-memory
+    litellm_params:
+      model: "openai/openai/gpt-5.4-mini"
+      api_base: "https://openrouter.ai/api/v1"
+      api_key: "os.environ/OPENROUTER_API_KEY"
 ```
 
-**4 model names chuẩn:**
-- `default` — Model chính (build, fix, task)
-- `smart` — Model thông minh nhất (spec, debug, architecture)
-- `fast` — Model nhanh nhất (review, scan, analyze)
-- `cheap` — Model rẻ nhất (docs, comment, cleanup)
+**5 model names chuẩn (v2.3):**
+- `default` — DeepSeek V4 Flash (build, fix, task)
+- `architect` — DeepSeek V4 Pro (system design, kien truc)
+- `smart` — Gemini 3 Flash (spec, debug, review sau)
+- `fast` — Gemini 3 Flash (scan nhanh, multimodal)
+- `cheap` — GPT-5.4 Mini (docs, comment, cleanup)
 
 ### 4.3 Hermes Agent (`hermes_config.yaml`)
 
@@ -384,13 +390,13 @@ Hermes tu dong goi LiteLLM proxy → chon model.
 
 ### Model profiles
 
-| Model | Strengths | Best for |
-|---|---|---|
-| gemini-flash | context_analysis, multimodal, review, summarize | Review, scan, large context |
-| kimi-k2.5 | frontend, react, nextjs, vue, css, tailwind | FE components, UI/UX |
-| deepseek | backend, nestjs, api, database, sql, typeorm | BE services, DB, API |
-| sonnet | architecture, spec, debug_complex, reasoning | Design, spec, complex debug |
-| local | docs, comment, simple_fix, format | Documentation, rename |
+| Model | LiteLLM name | Strengths | Best for |
+|---|---|---|---|
+| DeepSeek V4 Flash | `default` | backend, frontend, api, sql, logic | Build, fix, task |
+| DeepSeek V4 Pro | `architect` | architecture, system_design, reasoning | Kien truc, spec phuc tap |
+| Gemini 3 Flash | `smart`/`fast` | review, multimodal, context_analysis | Review, scan, debug, UI screenshot |
+| GPT-5.4 Mini | `cheap` | docs, comment, cleanup, text_gen | Docs, rename, wire-memory |
+| Qwen 7B (local) | `local-heavy` | backend, frontend, logic, simple_fix | Offline/private code |
 
 ### Routing logic
 
@@ -490,14 +496,14 @@ Moi phien, thay vi gui lai 5-10KB constitution + spec:
 ```
 User: "Them wishlist feature"
   ↓
-[1] Gemini Flash (dispatcher) — phan tich, chia 4 subtasks
+[1] Gemini 3 Flash (dispatcher) — phan tich, chia 4 subtasks
   ↓
-[2] Sonnet → Thiet ke API + DB schema
-[3] DeepSeek → Implement BE (depends on [2])
-[4] Kimi K2.5 → Implement FE (depends on [3])
-[5] Gemini Flash → Review tong the (depends on [4])
+[2] DeepSeek V4 Pro (architect) → Thiet ke API + DB schema
+[3] DeepSeek V4 Flash (default) → Implement BE (depends on [2])
+[4] DeepSeek V4 Flash (default) → Implement FE (depends on [3])
+[5] Gemini 3 Flash (fast) → Review tong the (depends on [4])
   ↓
-[6] Gemini Flash (synthesizer) — tong hop ket qua
+[6] Gemini 3 Flash (synthesizer) — tong hop ket qua
 ```
 
 ### Chi phi vs Claude Code
